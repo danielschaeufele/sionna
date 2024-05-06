@@ -7,7 +7,7 @@
 # pylint: disable=line-too-long
 
 import numpy as np
-from .utils import generate_prng_seq
+from .utils import generate_prng_seq, generate_low_papr_seq_type_1
 from .config import Config
 from sionna import nr
 from .utils import calculate_tb_size
@@ -233,7 +233,7 @@ class PUSCHConfig(Config):
             assert value in range(65536), "n_rnti must be in [0, 65535]"
         self._n_rnti = value
 
-    #---transform_precoding---#
+    #---precoding---#
     @property
     def precoding(self):
         """
@@ -518,7 +518,7 @@ class PUSCHConfig(Config):
             This property returns for each configured DMRS port an empty
             resource grid filled with DMRS signals as defined in
             Section 6.4.1.1 [3GPP38211]. Not all possible options are implemented,
-            e.g., frequency hopping and transform precoding are not available.
+            e.g., frequency hopping is not available.
 
             This property provides the *unprecoded* DMRS for each configured DMRS port.
             Precoding might be applied to map the DMRS to the antenna ports. However,
@@ -546,15 +546,24 @@ class PUSCHConfig(Config):
             # For every l_prime
             for l_prime in self.l_prime:
 
-                # Compute c_init
                 l = l_bar + l_prime
-                c_init = self.c_init(l)
 
-                # Generate RNG
-                c = generate_prng_seq(2*self.num_subcarriers, c_init=c_init)
+                if self.transform_precoding:
+                    if self.dmrs.n_sid is None:
+                        n_id = self.carrier.n_cell_id
+                    else:
+                        n_id = self.dmrs.n_sid
+                    r = generate_low_papr_seq_type_1(self.num_subcarriers // 2, n_id % 30, 0, 0)
+                    print(r)
+                else:
+                    # Compute c_init
+                    c_init = self.c_init(l)
 
-                # Map to QAM
-                r = 1/np.sqrt(2)*((1-2*c[::2]) + 1j*(1-2*c[1::2]))
+                    # Generate RNG
+                    c = generate_prng_seq(2*self.num_subcarriers, c_init=c_init)
+
+                    # Map to QAM
+                    r = 1/np.sqrt(2)*((1-2*c[::2]) + 1j*(1-2*c[1::2]))
 
                 # For every port in the dmrs port set
                 for j_ind, _ in enumerate(self.dmrs.dmrs_port_set):
@@ -904,6 +913,7 @@ class PUSCHConfig(Config):
     def check_config(self):
         """Test if the compound configuration is valid"""
 
+        # TODO: check transform precoding conditions
         self.carrier.check_config()
         self.dmrs.check_config()
         if self.precoding=="codebook":
@@ -1038,6 +1048,7 @@ def check_pusch_configs(pusch_configs):
         "num_antenna_ports" : pc.num_antenna_ports,
         "precoding" : pc.precoding,
         "precoding_matrices" : [],
+        "transform_precoding" : pc.transform_precoding,
         "pusch_config" : pc,
         "carrier_config" : pc.carrier,
         "num_coded_bits" : pc.num_coded_bits,

@@ -159,6 +159,21 @@ class PUSCHDMRSConfig(Config):
                 assert e in list(range(65536)), "Each element of n_id must be in [0, 65535]"
             self._n_id = value
 
+    #---n_sid---#
+    @property
+    def n_sid(self):
+        r"""
+        None (default), [0,...,1007] : DMRS scrambling identity for DFT-s-OFDM
+            :math:`n_\text{ID}^\text{PUSCH}`
+        """
+        self._ifndef("n_sid", None)
+        return self._n_scid
+
+    @n_sid.setter
+    def n_sid(self, value):
+        assert value is None or (isinstance(value, int) and value in range(1008)), "n_sid must None or in [0, 1007]"
+        self._n_sid = value
+
     #---n_scid---#
     @property
     def n_scid(self):

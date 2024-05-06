@@ -12,6 +12,7 @@ from sionna.mimo import StreamManagement
 from sionna.ofdm import OFDMDemodulator, LinearDetector
 from sionna.utils import insert_dims
 from sionna.channel import time_to_ofdm_channel
+from .pusch_detection import LinearTransformPrecodingDetector
 
 class PUSCHReceiver(Layer):
     # pylint: disable=line-too-long
@@ -197,14 +198,25 @@ class PUSCHReceiver(Layer):
         # Use or create default MIMODetector
         if mimo_detector is None:
             # Default MIMO detector
-            self._mimo_detector = LinearDetector("lmmse", "bit", "maxlog",
-                                        pusch_transmitter.resource_grid,
-                                        self._stream_management,
-                                        "qam",
-                                        pusch_transmitter._num_bits_per_symbol,
-                                        dtype=dtype)
+            if pusch_transmitter._transform_precoding:
+                self._mimo_detector = LinearTransformPrecodingDetector("lmmse", "bit", "maxlog",
+                                                                       pusch_transmitter.resource_grid,
+                                                                       self._stream_management,
+                                                                           "qam",
+                                                                       pusch_transmitter._num_bits_per_symbol,
+                                                                       dtype=dtype)
+            else:
+                self._mimo_detector = LinearDetector("lmmse", "bit", "maxlog",
+                                                     pusch_transmitter.resource_grid,
+                                                     self._stream_management,
+                                                     "qam",
+                                                     pusch_transmitter._num_bits_per_symbol,
+                                                     dtype=dtype)
         else:
             # User-provided MIMO detector
+            if pusch_transmitter._transform_precoding and not isinstance(mimo_detector,
+                                                                         LinearTransformPrecodingDetector):
+                print("WARNING: Using mimo detector which does not support transform precoding")
             self._mimo_detector = mimo_detector
 
         # Create LayerDemapper
@@ -247,7 +259,6 @@ class PUSCHReceiver(Layer):
             # Transform time-domain to frequency-domain channel
             if self._input_domain=="time":
                 h = time_to_ofdm_channel(h, self.resource_grid, self._l_min)
-
 
             if self._w is not None:
                 # Reshape h to put channel matrix dimensions last
