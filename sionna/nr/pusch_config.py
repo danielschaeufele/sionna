@@ -525,7 +525,7 @@ class PUSCHConfig(Config):
             resource elements in the resource grid. `True` corresponds to
             resource elements on which no data is transmitted.
         """
-        mask = np.zeros([self.num_subcarriers,
+        mask = np.zeros([self.num_effective_subcarriers,
                          self.carrier.num_symbols_per_slot],
                          dtype=bool)
 
@@ -540,7 +540,7 @@ class PUSCHConfig(Config):
                 cdm_ind[:,i] = np.array([0,1, 6, 7])+2*i
 
         for i in self.dmrs_symbol_indices:
-            for j in range(self.num_resource_blocks):
+            for j in range(self.num_effective_resource_blocks):
                 for k in range(num_cdm_groups):
                     mask[cdm_ind[:, k] + 12*j, i] = True
         return mask
