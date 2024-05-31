@@ -28,7 +28,7 @@ def generate_prng_seq(length, c_init):
     Note
     ----
     The initialization sequence ``c_init`` is application specific and is
-    usually provided be higher layer protocols.
+    usually provided by higher layer protocols.
     """
 
     # check inputs for consistency
@@ -72,6 +72,35 @@ def generate_prng_seq(length, c_init):
 
 
 def generate_low_papr_seq_type_1(length, u, v, alpha):
+    r"""Implements low-PAPR sequence generator as defined in Sec. 5.2.2
+    in [3GPP38211]_ based on Zadoff-Chu sequence.
+
+    Parameters
+    ----------
+    length: int
+        Desired output sequence length.
+
+    u: int
+        Base sequence group. Must be in the range of 0 to 29.
+
+    v: int
+        Base sequence number. Must be 0 if ``length`` < 72 or
+        in [0, 1] otherwise.
+
+    alpha: float
+        Cyclic shift that will be applied to sequence
+
+    Output
+    ------
+    :[``length``], ndarray of floating point values
+        Containing the low-PAPR sequence.
+
+    Note
+    ----
+    The parameters ``u``, ``v`` and ``alpha`` are application specific
+    and are usually provided by higher layer protocols.
+    """
+
     if not 0 <= u <= 29:
         raise ValueError("u has to be between 0 and 29")
     if (length < 72 and v != 0) or v not in [0, 1]:
@@ -100,6 +129,7 @@ def generate_low_papr_seq_type_1(length, u, v, alpha):
 
 
 def _largest_prime_lt_n(n):
+    """Return the largest prime number that is less than or equal to `n`."""
     # Only check uneven numbers
     if n % 2 == 0:
         n -= 1
@@ -118,6 +148,7 @@ def _largest_prime_lt_n(n):
 
 
 def _get_phi(u, m):
+    """Return vector according to tables 5.2.2.2-x in [3GPP38211]_."""
     if m == 6:
         phi_table = [
             [-3, -1, 3, 3, -1, -3],

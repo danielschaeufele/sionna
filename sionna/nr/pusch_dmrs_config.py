@@ -151,12 +151,12 @@ class PUSCHDMRSConfig(Config):
         if value is None:
             self._n_id = None
         elif isinstance(value, int):
-            assert value in list(range(65536)), "n_id must be in [0, 65535]"
+            assert value in range(65536), "n_id must be in [0, 65535]"
             self._n_id = [value, value]
         else:
             assert len(value)==2, "n_id must be either [] or a two-tuple"
             for e in value:
-                assert e in list(range(65536)), "Each element of n_id must be in [0, 65535]"
+                assert e in range(65536), "Each element of n_id must be in [0, 65535]"
             self._n_id = value
 
     #---n_sid---#
@@ -167,7 +167,7 @@ class PUSCHDMRSConfig(Config):
             :math:`n_\text{ID}^\text{PUSCH}`
         """
         self._ifndef("n_sid", None)
-        return self._n_scid
+        return self._n_sid
 
     @n_sid.setter
     def n_sid(self, value):

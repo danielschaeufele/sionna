@@ -170,6 +170,7 @@ class PUSCHTransmitter(Layer):
                             num_tx=self._num_tx,
                             num_streams_per_tx=self._num_layers,
                             cyclic_prefix_length=self._cyclic_prefix_length,
+                            num_guard_carriers=(0, self._num_subcarriers - self._num_effective_subcarriers),
                             pilot_pattern=self._pilot_pattern,
                             dtype=dtype)
 
