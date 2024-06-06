@@ -162,13 +162,15 @@ class PUSCHTransmitter(Layer):
                                                 dtype=dtype)
 
         # Create ResourceGrid
+        num_guard_carriers = self._fft_size - self._num_subcarriers
         self._resource_grid = ResourceGrid(
                             num_ofdm_symbols=self._num_ofdm_symbols,
-                            fft_size=self._num_subcarriers,
+                            fft_size=self._fft_size,
                             subcarrier_spacing=self._subcarrier_spacing,
                             num_tx=self._num_tx,
                             num_streams_per_tx=self._num_layers,
                             cyclic_prefix_length=self._cyclic_prefix_length,
+                            num_guard_carriers=(num_guard_carriers//2, num_guard_carriers//2),
                             pilot_pattern=self._pilot_pattern,
                             dtype=dtype)
 

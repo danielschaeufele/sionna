@@ -157,7 +157,7 @@ class PUSCHReceiver(Layer):
                 "l_min must be provided for input_domain==time"
             self._l_min = l_min
             self._ofdm_demodulator = OFDMDemodulator(
-                fft_size=pusch_transmitter._num_subcarriers,
+                fft_size=pusch_transmitter._fft_size,
                 l_min=self._l_min,
                 cyclic_prefix_length=pusch_transmitter._cyclic_prefix_length)
 
