@@ -161,7 +161,7 @@ class PUSCHReceiver(Layer):
                 pusch_transmitter._carrier_config.num_slots_per_subframe *
                 pusch_transmitter._carrier_config.num_symbols_per_slot // 2)
             self._ofdm_demodulator = OFDMDemodulator(
-                fft_size=pusch_transmitter._num_subcarriers,
+                fft_size=pusch_transmitter._fft_size,
                 l_min=self._l_min,
                 cyclic_prefix_length=pusch_transmitter._cyclic_prefix_length,
                 cyclic_prefix_length_first_symbol=

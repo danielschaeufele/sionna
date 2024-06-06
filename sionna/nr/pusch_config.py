@@ -146,6 +146,33 @@ class PUSCHConfig(Config):
             "n_start_bwp must be in the range from 0 to 2473"
         self._n_start_bwp = value
 
+    #---sample_rate---#
+    @property
+    def sample_rate(self):
+        r"""
+        None, "standard" or float : Sample rate of the system. When set to
+        `None` the sample rate will be equal to the bandwidth of the system.
+        When set to `"standard"` a standard conform sample rate will be
+        chosen (i.e., the FFT size has to be a power of 2, not smaller than
+        128 and the maximum occupancy is 85%).
+        """
+        self._ifndef("sample_rate", None)
+        if self._sample_rate is None:
+            return self.num_subcarriers * self.carrier.subcarrier_spacing * 1e3
+        elif self._sample_rate == "standard":
+            fft_size = 2 ** np.ceil(np.log2(self.num_subcarriers))
+            fft_size = max(128, fft_size)  # Minimum FFT size is 128
+            if self.num_subcarriers / fft_size > 0.85:  # Maximum occupancy is 85%
+                fft_size *= 2
+            return fft_size * self.carrier.subcarrier_spacing * 1e3
+        else:
+            return self._sample_rate
+
+    @sample_rate.setter
+    def sample_rate(self, value):
+        assert value is None or value == "standard" or value > 0,\
+            "`sample_rate` must be None or 'standard' or a positive number."
+        self._sample_rate = value
 
     #---num-layers---#
     @property
@@ -517,6 +544,13 @@ class PUSCHConfig(Config):
         num_res_data = 12
 
         return num_data*num_res_data + num_dmrs*num_res_dmrs
+
+    @property
+    def fft_size(self):
+        """
+        int, read-only : FFT size that will be used for time domain modulation
+        """
+        return int(np.round(self.sample_rate / (self.carrier.subcarrier_spacing * 1e3)))
 
     @property
     def dmrs_mask(self):
@@ -1067,6 +1101,9 @@ class PUSCHConfig(Config):
                + self.symbol_allocation[1]<=max_length, \
             "symbol_allocation[0]+symbol_allocation[1] must be < 14 (or 12)"
 
+        assert self.sample_rate >= self.num_subcarriers * self.carrier.subcarrier_spacing * 1e3,\
+            "Sample rate must be at least as big as the bandwidth"
+
         attr_list = ["n_size_bwp",
                      "n_start_bwp",
                      "num_layers",
@@ -1116,6 +1153,7 @@ def check_pusch_configs(pusch_configs):
         "num_tx" : len(pusch_configs),
         "num_layers" : pc.num_layers,
         "num_subcarriers" : pc.num_subcarriers,
+        "fft_size" : pc.fft_size,
         "num_effective_subcarriers": pc.num_effective_subcarriers,
         "num_ofdm_symbols" : pc.symbol_allocation[1],
         "subcarrier_spacing" : pc.carrier.subcarrier_spacing*1e3,
@@ -1136,10 +1174,10 @@ def check_pusch_configs(pusch_configs):
     }
     params["bandwidth"] = params["num_subcarriers"]*params["subcarrier_spacing"]
     params["cyclic_prefix_length"] = int(np.ceil(carrier.cyclic_prefix_length *
-                                             params["bandwidth"]))
+                                             pc.sample_rate))
     params["cyclic_prefix_length_first_symbol"] =\
         int(np.ceil(carrier.cyclic_prefix_length_first_symbol
-                    * params["bandwidth"]))
+                    * pc.sample_rate))
 
     for pusch_config in pusch_configs:
         if params["precoding"]=="codebook":
