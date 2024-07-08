@@ -6,6 +6,8 @@
 """
 # pylint: disable=line-too-long
 
+import numpy as np
+
 from .config import Config
 
 class CarrierConfig(Config):
@@ -244,27 +246,22 @@ class CarrierConfig(Config):
     @property
     def cyclic_prefix_length(self):
         r"""
-        float, read-only : Cyclic prefix length of all symbols except for the
-            first symbol in each half subframe
+        np.ndarray[float], read-only : Vector of cyclic prefix length of all
+            symbols in the current slot as defined in Section 5.3.1 [3GPP38211]_
             :math:`N_{\text{CP},l}^{\mu} \cdot T_{\text{c}}` [s]
         """
+        cp = np.zeros(self.num_symbols_per_slot)
         if self.cyclic_prefix=="extended":
-            cp = 512*self.kappa*2**(-self.mu)
+            cp[:] = 512*self.kappa*2**(-self.mu)
         else:
-            cp = 144*self.kappa*2**(-self.mu)
-        return cp*self.t_c
+            cp[:] = 144*self.kappa*2**(-self.mu)
 
-    @property
-    def cyclic_prefix_length_first_symbol(self):
-        r"""
-        float, read-only : Cyclic prefix length of first symbol in each
-            half subframe
-            :math:`N_{\text{CP},l}^{\mu} \cdot T_{\text{c}}` [s]
-        """
-        if self.cyclic_prefix=="extended":
-            cp = 512*self.kappa*2**(-self.mu)
-        else:
-            cp = 144*self.kappa*2**(-self.mu) + 16*self.kappa
+            # Extend cyclic prefix for l=0 or l=7*2^\mu
+            long_cp_period = 7 * 2 ** self.mu
+            l_start = self.slot_number * self.num_symbols_per_slot
+            for i in range(l_start % long_cp_period,
+                           self.num_symbols_per_slot, long_cp_period):
+                cp[i] += 16*self.kappa
         return cp*self.t_c
 
     #-------------------#

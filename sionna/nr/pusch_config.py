@@ -1173,11 +1173,8 @@ def check_pusch_configs(pusch_configs):
         "num_cdm_groups_without_data" : pc.dmrs.num_cdm_groups_without_data
     }
     params["bandwidth"] = params["num_subcarriers"]*params["subcarrier_spacing"]
-    params["cyclic_prefix_length"] = int(np.ceil(carrier.cyclic_prefix_length *
-                                             pc.sample_rate))
-    params["cyclic_prefix_length_first_symbol"] =\
-        int(np.ceil(carrier.cyclic_prefix_length_first_symbol
-                    * pc.sample_rate))
+    params["cyclic_prefix_length"] = np.ceil(carrier.cyclic_prefix_length *
+                                             pc.sample_rate).astype(int)
 
     for pusch_config in pusch_configs:
         if params["precoding"]=="codebook":

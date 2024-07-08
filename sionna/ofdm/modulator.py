@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 """Class definition for the OFDM Modulator"""
-
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Layer
 from tensorflow.signal import ifftshift
@@ -14,35 +14,16 @@ from sionna.signal import ifft
 class OFDMModulator(Layer):
     # pylint: disable=line-too-long
     """
-    OFDMModulator(cyclic_prefix_length=0, cyclic_prefix_length_first_symbol=None, symbols_per_block=1, **kwargs)
+    OFDMModulator(cyclic_prefix_length=0, **kwargs)
 
     Computes the time-domain representation of an OFDM resource grid
     with (optional) cyclic prefix.
 
-    When only `cyclic_prefix_length` is given then a cyclic prefix of length
-    `cyclic_prefix_length` is prepended for each symbol. When additionally
-    `cyclic_prefix_length_first_symbol` and `symbols_per_block` are given then
-    the length of the cyclic prefix is `cyclic_prefix_length_first_symbol` for
-    the first symbol of each block and `cyclic_prefix_length` for the
-    remaining symbols. For LTE one block corresponds to one slot (i.e., 7
-    symbols). For 5G NR one block corresponds to one half subframe and the
-    number of symbols depends on the numerology.
-
     Parameters
     ----------
-    cyclic_prefix_length : int
-        Integer indicating the length of the cyclic prefix that it prepended
-        to each OFDM symbol (except for the first symbol of each block if
-        `cyclic_prefix_length_first_symbol` and `symbols per block` is given).
-        It cannot be longer than the FFT size.
-
-    cyclic_prefix_length_first_symbol : int
-        Integer indicating the length of the cyclic prefix that it prepended
-        to the first OFDM symbol of each block. It cannot be longer than the
-        FFT size.
-
-    symbols_per_block : int
-        Integer indicating the number of symbols per block.
+    cyclic_prefix_length : int or list[int] or np.ndarray[int]
+        Integer or vector of integers indicating the length of the cyclic
+        prefix that it prepended to each OFDM symbol.
 
     Input
     -----
@@ -55,14 +36,9 @@ class OFDMModulator(Layer):
         Time-domain OFDM signal.
     """
 
-    def __init__(self, cyclic_prefix_length=0,
-                 cyclic_prefix_length_first_symbol=None, symbols_per_block=1,
-                 **kwargs):
+    def __init__(self, cyclic_prefix_length=0, **kwargs):
         super().__init__(**kwargs)
         self.cyclic_prefix_length = cyclic_prefix_length
-        self.cyclic_prefix_length_first_symbol = (
-            cyclic_prefix_length_first_symbol)
-        self.symbols_per_block = symbols_per_block
 
     @property
     def cyclic_prefix_length(self):
@@ -70,48 +46,42 @@ class OFDMModulator(Layer):
 
     @cyclic_prefix_length.setter
     def cyclic_prefix_length(self, value):
-        assert isinstance(value, int) and value >=0,\
-            "`cyclic_prefix_length` must be a nonnegative integer."
-        self._cyclic_prefix_length = value
-
-    @property
-    def cyclic_prefix_length_first_symbol(self):
-        if self._cyclic_prefix_length_first_symbol is None:
-            return self._cyclic_prefix_length
+        if isinstance(value, list):
+            value = np.array(value)
+        if isinstance(value, np.ndarray):
+            assert (np.issubdtype(value.dtype, np.integer) and
+                    value.ndim == 1 and np.all(value >= 0)),\
+                ("`cyclic_prefix_length` must be a 1D array with"
+                 " only nonnegative integers.")
         else:
-            return self._cyclic_prefix_length_first_symbol
-
-    @cyclic_prefix_length_first_symbol.setter
-    def cyclic_prefix_length_first_symbol(self, value):
-        assert (value is None or isinstance(value, int) and
-                value >= self._cyclic_prefix_length),\
-            ("`cyclic_prefix_length_first_symbol` must be larger or equal " +
-             "to `cyclic_prefix_length`.")
-        self._cyclic_prefix_length_first_symbol = value
-
-    @property
-    def symbols_per_block(self):
-        return self._symbols_per_block
-
-    @symbols_per_block.setter
-    def symbols_per_block(self, value):
-        assert isinstance(value, int) and value>=1,\
-            "`symbols_per_block` must be a positive integer."
-        self._symbols_per_block = value
+            assert isinstance(value, int) and value >=0,\
+                "`cyclic_prefix_length` must be a nonnegative integer."
+        self._cyclic_prefix_length = value
 
     def build(self, input_shape):
         fft_size = input_shape[-1]
         num_ofdm_symbols = input_shape[-2]
 
-        # Verify that cyclic prefix is not longer than the FFT size.
-        assert self.cyclic_prefix_length<=fft_size, \
-            "shape(inputs)[-1] must not be smaller than `cylic_prefix_length`"
-        assert self.cyclic_prefix_length_first_symbol <= fft_size, \
-            ("shape(inputs)[-1] must not be smaller than " +
-             " `cylic_prefix_length_first_symbol`")
+        if isinstance(self.cyclic_prefix_length, int):
+            self.cyclic_prefix_length = np.full(num_ofdm_symbols,
+                                                self.cyclic_prefix_length)
+        else:
+            assert len(self.cyclic_prefix_length) == num_ofdm_symbols,\
+                ("shape(inputs)[-2] must match size of lists of cyclic"
+                 " prefix lengths")
 
-        # Compute padding size to fill the last block
-        self._num_pad_symbols = -num_ofdm_symbols % self.symbols_per_block
+        gather_idx = []
+        for i, cp_len in enumerate(self.cyclic_prefix_length):
+            assert cp_len <= fft_size, \
+                ("shape(inputs)[-1] must not be smaller than"
+                 " `cylic_prefix_length`")
+
+            gather_idx.append(tf.range(fft_size * (i + 1) - cp_len,
+                                       fft_size * (i + 1), dtype=tf.int32))
+            gather_idx.append(tf.range(fft_size * i,
+                                       fft_size * (i + 1), dtype=tf.int32))
+
+        self._gather_idx = tf.concat(gather_idx, 0)
 
     def call(self, inputs):
         fft_size = tf.shape(inputs)[-1]
@@ -124,40 +94,11 @@ class OFDMModulator(Layer):
         # Compute IFFT along the last dimension
         x = ifft(inputs)
 
-        # Add padding to fill up last block
-        if self._num_pad_symbols != 0:
-            padding_shape = tf.concat([batch_dims,
-                                   [self._num_pad_symbols, fft_size]], axis=0)
-            padding = tf.zeros(padding_shape, dtype=x.dtype)
-            x = tf.concat([x, padding], axis=-2)
+        # Reshape into slots
+        new_shape = tf.concat([batch_dims, [num_ofdm_symbols * fft_size]], 0)
+        x = tf.reshape(x, new_shape)
 
-        # Obtain cyclic prefix
-        cp = x[...,fft_size-self.cyclic_prefix_length:]
-
-        # Prepend cyclic prefix
-        x = tf.concat([cp, x], -1)
-
-        # Reshape to blocks
-        num_blocks = tf.math.ceil(num_ofdm_symbols / self.symbols_per_block)
-        samples_per_block = (self.symbols_per_block *
-                             (self.cyclic_prefix_length + fft_size))
-        shape = tf.concat([batch_dims,
-                           [num_blocks, samples_per_block]], axis=0)
-        x = tf.reshape(x, shape)
-
-        # Obtain additional cyclic prefix for first symbol in block
-        cp = x[...,fft_size+self.cyclic_prefix_length-
-                   self.cyclic_prefix_length_first_symbol:fft_size]
-
-        # Prepend additional cyclic prefix
-        x = tf.concat([cp, x], -1)
-
-        # Serialize last two dimensions
-        x = flatten_last_dims(x, 2)
-
-        # Remove padding
-        if self._num_pad_symbols != 0:
-            x = x[..., :-self._num_pad_symbols *
-                         (self.cyclic_prefix_length + fft_size)]
+        # Add cyclic prefix
+        x = tf.gather(x, self._gather_idx, axis=-1)
 
         return x

@@ -108,4 +108,5 @@ class TestPUSCHTransmitter(unittest.TestCase):
         self.assertAlmostEqual(pusch_config.sample_rate, 122.88e6)
         self.assertEqual(pt.resource_grid.fft_size, 4096)
         self.assertEqual(pt.resource_grid.num_effective_subcarriers, 3276)
-        self.assertEqual(pt._ofdm_modulator.cyclic_prefix_length, 288)
+        np.testing.assert_array_equal(pt._ofdm_modulator.cyclic_prefix_length,
+                                      [352] + [288]*13)

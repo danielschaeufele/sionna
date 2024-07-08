@@ -58,8 +58,10 @@ class TestOFDMModulator(unittest.TestCase):
         cp_length_other_symbols = 16
 
         for symbols_per_block in [7, 10, 20]:
-            modulator = OFDMModulator(cp_length_other_symbols, cp_length_first_symbol,
-                                      symbols_per_block)
+            cp_lengths = ([cp_length_first_symbol] +
+                          [cp_length_other_symbols] * (symbols_per_block - 1))
+            cp_lengths = (cp_lengths * 2)[:num_ofdm_symbols]
+            modulator = OFDMModulator(cp_lengths)
             qam_source = QAMSource(4)
             x = qam_source([batch_size, num_ofdm_symbols, fft_size])
             x_time = modulator(x)
@@ -113,10 +115,11 @@ class TestOFDMDemodulator(unittest.TestCase):
         cp_length_other_symbols = 16
 
         for symbols_per_block in [7, 10, 20]:
-            modulator = OFDMModulator(cp_length_other_symbols,
-                cp_length_first_symbol, symbols_per_block)
-            demodulator = OFDMDemodulator(fft_size, 0, cp_length_other_symbols,
-                                          cp_length_first_symbol, symbols_per_block)
+            cp_lengths = ([cp_length_first_symbol] +
+                          [cp_length_other_symbols] * (symbols_per_block - 1))
+            cp_lengths = (cp_lengths * 2)[:num_ofdm_symbols]
+            modulator = OFDMModulator(cp_lengths)
+            demodulator = OFDMDemodulator(fft_size, 0, cp_lengths)
             qam_source = QAMSource(4)
             x = qam_source([batch_size, num_ofdm_symbols, fft_size])
             x_time = modulator(x)
