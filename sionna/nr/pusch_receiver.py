@@ -162,6 +162,8 @@ class PUSCHReceiver(Layer):
                 l_min=self._l_min,
                 cyclic_prefix_length=pusch_transmitter._cyclic_prefix_length)
 
+            self._phase_correction_sequence = pusch_transmitter._phase_correction_sequence
+
         # Use or create default ChannelEstimator
         self._perfect_csi = False
         self._w = None
@@ -246,6 +248,8 @@ class PUSCHReceiver(Layer):
         # (Optional) OFDM Demodulation
         if self._input_domain=="time":
             y = self._ofdm_demodulator(y)
+            y *= tf.expand_dims(tf.cast(
+                self._phase_correction_sequence, y.dtype), -1)
 
         # Channel estimation
         if self._perfect_csi:

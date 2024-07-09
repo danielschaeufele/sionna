@@ -145,6 +145,20 @@ class CarrierConfig(Config):
         assert value in range(0,1024), "frame_number must be in [0, 1023]"
         self._frame_number = value
 
+    #---carrier_frequency---#
+    @property
+    def carrier_frequency(self):
+        r"""
+        float: Carrier frequency :math:`f_0` in Hz
+        """
+        self._ifndef("carrier_frequency", 0.)
+        return self._carrier_frequency
+
+    @carrier_frequency.setter
+    def carrier_frequency(self, value):
+        assert value > 0, "carrier_frequency must be positive"
+        self._carrier_frequency = value
+
     #--------------------------#
     #---Read-only parameters---#
     #--------------------------#

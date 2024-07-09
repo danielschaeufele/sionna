@@ -257,7 +257,9 @@ class PUSCHTransmitter(Layer):
 
         # (Optionally) apply OFDM modulation
         if self._output_domain=="time":
-            x = self._ofdm_modulator(x_pre)
+            x = x_pre / tf.expand_dims(tf.cast(
+                self._phase_correction_sequence, x_pre.dtype), -1)
+            x = self._ofdm_modulator(x)
         else:
             x = x_pre
 

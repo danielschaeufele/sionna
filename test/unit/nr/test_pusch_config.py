@@ -301,3 +301,33 @@ class TestCarrierConfig(unittest.TestCase):
         np.testing.assert_array_almost_equal(carrier_config.cyclic_prefix_length * 1e6, [0.81] + [0.29] * 13, decimal=2)
         carrier_config = CarrierConfig(subcarrier_spacing=240, slot_number=1)
         np.testing.assert_array_almost_equal(carrier_config.cyclic_prefix_length * 1e6, [0.29] * 14, decimal=2)
+
+
+class TestPUSCHConfig(unittest.TestCase):
+    """Tests for the PUSCHConfig class"""
+
+    def test_phase_correction_sequence(self):
+        """Generate carrier signal for upconversion and compare phase shift at
+        the start of each symbol with the generated phase correction sequence"""
+        for subcarrier_spacing in [15, 30, 60, 120, 240]:
+            pusch_config = PUSCHConfig(subcarrier_spacing=subcarrier_spacing,
+                                       sample_rate="standard")
+            for carrier_frequency in np.arange(1e9, 10e9, .5e9):
+                pusch_config.carrier.carrier_frequency = carrier_frequency
+
+                fft_size = pusch_config.fft_size
+                cp_lengths = np.round(pusch_config.carrier.cyclic_prefix_length *
+                                      pusch_config.sample_rate).astype(int)
+
+                sample_idx = np.arange(-cp_lengths[0], np.sum(cp_lengths[1:])
+                                       + fft_size * len(cp_lengths))
+                upconversion_vector = np.exp(2.j*np.pi*carrier_frequency*
+                                             sample_idx/pusch_config.sample_rate)
+
+                symbol_end_idx = np.cumsum(cp_lengths + fft_size)
+                phase_rotations = []
+                for idx in symbol_end_idx:
+                    phase_rotations.append(upconversion_vector[idx - fft_size])
+
+                np.testing.assert_array_almost_equal(phase_rotations,
+                                     pusch_config.phase_correction_sequence)

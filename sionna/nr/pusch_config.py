@@ -967,6 +967,19 @@ class PUSCHConfig(Config):
 
         return tb_size
 
+    @property
+    def phase_correction_sequence(self):
+        r"""
+        np.ndarray[float], read-only: Vector of phase rotations (implicitly)
+            defined in Section 5.4 [3GPP38211]_.
+        """
+        symbol_durations = (self.carrier.cyclic_prefix_length +
+                            self.fft_size / self.sample_rate)
+        # Reference point is start of first symbol, so ignore first cyclic prefix
+        symbol_durations[0] = 0.
+        symbol_start_times = np.cumsum(symbol_durations)
+        return np.exp(1j*2*np.pi*self.carrier.carrier_frequency*symbol_start_times)
+
     #-------------------#
     #---Class methods---#
     #-------------------#
@@ -1170,7 +1183,8 @@ def check_pusch_configs(pusch_configs):
         "tb_size" : pc.tb_size,
         "dmrs_length" : pc.dmrs.length,
         "dmrs_additional_position" : pc.dmrs.additional_position,
-        "num_cdm_groups_without_data" : pc.dmrs.num_cdm_groups_without_data
+        "num_cdm_groups_without_data" : pc.dmrs.num_cdm_groups_without_data,
+        "phase_correction_sequence" : pc.phase_correction_sequence,
     }
     params["bandwidth"] = params["num_subcarriers"]*params["subcarrier_spacing"]
     params["cyclic_prefix_length"] = np.ceil(carrier.cyclic_prefix_length *
