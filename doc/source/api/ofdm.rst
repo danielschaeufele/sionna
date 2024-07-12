@@ -21,10 +21,11 @@ that automatically generates orthogonal pilot transmissions for all transmitters
 and streams.
 
 Additionally, the module contains layers for channel estimation, precoding,
-equalization, and detection,
+equalization, detection, and CFO compensation,
 such as the :class:`~sionna.ofdm.LSChannelEstimator`, the
-:class:`~sionna.ofdm.ZFPrecoder`, and the :class:`~sionna.ofdm.LMMSEEqualizer` and
-:class:`~sionna.ofdm.LinearDetector`.
+:class:`~sionna.ofdm.ZFPrecoder`, the :class:`~sionna.ofdm.LMMSEEqualizer`, the
+:class:`~sionna.ofdm.LinearDetector`, and the
+:class:`~sionna.ofdm.CFOCompensator`.
 These are good starting points for the development of more advanced algorithms
 and provide robust baselines for benchmarking.
 
@@ -308,5 +309,15 @@ MaximumLikelihoodDetectorWithPrior
 MMSEPICDetector
 ----------------
 .. autoclass:: sionna.ofdm.MMSEPICDetector
+   :exclude-members: call, build
+   :members:
+
+CFO Compensation
+****************
+
+CFOCompensator
+--------------
+
+.. autoclass:: sionna.ofdm.CFOCompensator
    :exclude-members: call, build
    :members:

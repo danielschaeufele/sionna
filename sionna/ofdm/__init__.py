@@ -14,3 +14,4 @@ from .channel_estimation import LSChannelEstimator, NearestNeighborInterpolator,
 from .equalization import OFDMEqualizer, LMMSEEqualizer, ZFEqualizer, MFEqualizer
 from .detection import OFDMDetector, OFDMDetectorWithPrior, MaximumLikelihoodDetector, MaximumLikelihoodDetectorWithPrior, LinearDetector, KBestDetector, EPDetector, MMSEPICDetector
 from .precoding import ZFPrecoder
+from .cfo_compensator import CFOCompensator
