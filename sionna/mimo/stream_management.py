@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-"Classeds and functions related to stream management in MIMO systems"
+"""Classes and functions related to stream management in MIMO systems"""
 
 import numpy as np
 
@@ -50,38 +50,38 @@ class StreamManagement():
 
     @property
     def num_rx(self):
-        "Number of receivers."
+        """Number of receivers."""
         return self._num_rx
 
     @property
     def num_tx(self):
-        "Number of transmitters."
+        """Number of transmitters."""
         return self._num_tx
 
     @property
     def num_streams_per_tx(self):
-        "Number of streams per transmitter."
+        """Number of streams per transmitter."""
         return self._num_streams_per_tx
 
     @property
     def num_streams_per_rx(self):
-        "Number of streams transmitted to each receiver."
+        """Number of streams transmitted to each receiver."""
         return int(self.num_tx*self.num_streams_per_tx/self.num_rx)
 
     @property
     def num_interfering_streams_per_rx(self):
-        "Number of interfering streams received at each eceiver."
+        """Number of interfering streams received at each receiver."""
         return int(self.num_tx*self.num_streams_per_tx
                    - self.num_streams_per_rx)
 
     @property
     def num_tx_per_rx(self):
-        "Number of transmitters communicating with a receiver."
+        """Number of transmitters communicating with a receiver."""
         return self._num_tx_per_rx
 
     @property
     def num_rx_per_tx(self):
-        "Number of receivers communicating with a transmitter."
+        """Number of receivers communicating with a transmitter."""
         return self._num_rx_per_tx
 
     @property
@@ -135,7 +135,7 @@ class StreamManagement():
         """Mapping of streams to transmitters.
 
         A NumPy array of shape `[num_tx, num_streams_per_tx]`.
-        Streams are numbered from 0,1,... and assiged to transmitters in
+        Streams are numbered from 0,1,... and assigned to transmitters in
         increasing order, i.e., transmitter 0 gets the first
         `num_streams_per_tx` and so on.
         """

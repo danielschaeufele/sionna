@@ -16,7 +16,7 @@ class PUSCHLSChannelEstimator(LSChannelEstimator, Layer):
     Layer implementing least-squares (LS) channel estimation for NR PUSCH Transmissions.
 
     After LS channel estimation at the pilot positions, the channel estimates
-    and error variances are interpolated accross the entire resource grid using
+    and error variances are interpolated across the entire resource grid using
     a specified interpolation function.
 
     The implementation is similar to that of :class:`~sionna.ofdm.LSChannelEstimator`.

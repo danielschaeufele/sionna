@@ -533,12 +533,12 @@ class MaximumLikelihoodDetector(Layer):
         h = tf.matmul(s_inv, h)
 
         # Add extra dims for broadcasting with the dimensions corresponding
-        # to all possible transmimtted vectors
+        # to all possible transmitted vectors
         # Shape: [..., 1, M, K]
         h = tf.expand_dims(h, axis=-3)
 
         # Add extra dims for broadcasting with the dimensions corresponding
-        # to all possible transmimtted vectors
+        # to all possible transmitted vectors
         # Shape: [..., 1, M]
         y = tf.expand_dims(y, axis=-2)
 
@@ -1843,7 +1843,7 @@ class MMSEPICDetector(Layer):
         y_mf = insert_dims(tf.linalg.matvec(h, y, adjoint_a=True),
                             num_dims=1, axis=-1)
 
-        ## Step 1: compute Gramm matrix
+        ## Step 1: compute Gram matrix
         # [..., K, K]
         g = tf.matmul(h, h, adjoint_a=True)
 
@@ -1960,7 +1960,7 @@ class MMSEPICDetector(Layer):
         llr_e = llr_d - llr_a
         if self._output == "symbol":
             # convert back to symbols if requested.
-             # output symbol logits computed on extrinsic LLRs
+            # output symbol logits computed on extrinsic LLRs
             out = self._llr_2_symbol_logits_output(llr_e)
         else:
             # output extrinsic LLRs

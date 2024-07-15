@@ -14,7 +14,7 @@ Creating a pull request requires the following steps:
 2. Add new tests if needed in the ``test`` folder.
 3. Lint your code (``make lint``).
 4. Ensure that all tests pass (``make test``).
-5. Include a license at the topf of new files.
+5. Include a license at the top of new files.
 5. Make sure that all commits are "signed-off" as described below.
 
 ### Signing your contributions

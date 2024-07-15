@@ -310,7 +310,7 @@ class Constellation(Layer):
                                         constellation=None,
                                         dtype=tf.complex64):
         # pylint: disable=line-too-long
-        r"""Static method for conviently creating a constellation object or checking that an existing one
+        r"""Static method for conveniently creating a constellation object or checking that an existing one
         is consistent with requested settings.
 
         If ``constellation`` is `None`, then this method creates a :class:`~sionna.mapping.Constellation`

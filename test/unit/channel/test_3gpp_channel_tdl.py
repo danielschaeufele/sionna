@@ -282,7 +282,7 @@ class TestTDL(unittest.TestCase):
                 # max_err = np.max(np.abs(r_abs2 - ref_r_abs2))
                 # self.assertLessEqual(max_err, TestTDL.MAX_ERR, f'{model}')
 
-    # No need to test on evey channel model for spatial correlation
+    # No need to test on every channel model for spatial correlation
     def test_spatial_correlation_separate_rx_tx(self):
         """Test spatial Correlation with separate RX and TX correlation"""
         # Forcing the seed to make the tests deterministic
@@ -332,7 +332,7 @@ class TestTDL(unittest.TestCase):
         max_err = np.max(np.abs(est_tx_cov - tx_corr_mat))
         self.assertLessEqual(max_err, TestTDL.MAX_ERR, f'Transmitter correlation')
 
-    # No need to test on evey channel model for spatial correlation
+    # No need to test on every channel model for spatial correlation
     def test_spatial_correlation_joint_rx_tx(self):
         """Test spatial Correlation with joint filtering"""
         # Forcing the seed to make the tests deterministic
@@ -380,7 +380,7 @@ class TestTDL(unittest.TestCase):
         max_err = np.max(np.abs(est_spatial_cov - spatial_corr_mat))
         self.assertLessEqual(max_err, TestTDL.MAX_ERR)
 
-    # No need to test on evey channel model for spatial correlation
+    # No need to test on every channel model for spatial correlation
     def test_no_spatial_correlation(self):
         """No spatial correlation specified leads to no spatial correlation observed"""
         # Forcing the seed to make the tests deterministic
@@ -420,7 +420,7 @@ class TestTDL(unittest.TestCase):
         max_err = np.max(np.abs(est_spatial_cov - spatial_corr_mat))
         self.assertLessEqual(max_err, TestTDL.MAX_ERR)
 
-    # No need to test on evey channel model for spatial correlation
+    # No need to test on every channel model for spatial correlation
     def test_rx_corr_only(self):
         """Test with RX spatial correlation only"""
         # Forcing the seed to make the tests deterministic
@@ -520,7 +520,7 @@ class TestTDL(unittest.TestCase):
         max_err = np.max(np.abs(est_tx_cov - tx_corr_mat))
         self.assertLessEqual(max_err, TestTDL.MAX_ERR, f'Transmitter correlation')
 
-    # No need to test on evey channel model for spatial correlation
+    # No need to test on every channel model for spatial correlation
     def test_spatial_correlation_all_three_inputs(self):
         """Test spatial correlation with all three inputs"""
         # Forcing the seed to make the tests deterministic

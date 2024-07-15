@@ -38,8 +38,8 @@ class ResourceGrid():
         cyclic_prefix_length : int
             Length of the cyclic prefix.
 
-        num_guard_carriers : int
-            List of two integers defining the number of guardcarriers at the
+        num_guard_carriers : tuple[int, int]
+            List of two integers defining the number of guard carriers at the
             left and right side of the resource grid.
 
         dc_null : bool

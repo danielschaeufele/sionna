@@ -206,7 +206,7 @@ def ifft(tensor, axis=-1):
     scale = tf.sqrt(fft_size)
 
     if axis not in [-1, tensor.shape.rank]:
-        output =  tf.signal.ifft(swapaxes(tensor, axis, -1))
+        output = tf.signal.ifft(swapaxes(tensor, axis, -1))
         output = swapaxes(output, axis, -1)
     else:
         output = tf.signal.ifft(tensor)

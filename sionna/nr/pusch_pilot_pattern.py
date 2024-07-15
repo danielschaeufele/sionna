@@ -18,14 +18,14 @@ class PUSCHPilotPattern(PilotPattern):
     This class defines a :class:`~sionna.ofdm.PilotPattern`
     that is used to configure an OFDM :class:`~sionna.ofdm.ResourceGrid`.
 
-    For every transmitter, a separte :class:`~sionna.nr.PUSCHConfig`
+    For every transmitter, a separate :class:`~sionna.nr.PUSCHConfig`
     needs to be provided from which the pilot pattern will be created.
 
     Parameters
     ----------
     pusch_configs : instance or list of :class:`~sionna.nr.PUSCHConfig`
         PUSCH Configurations according to which the pilot pattern
-        will created. One configuration is needed for each transmitter.
+        will be created. One configuration is needed for each transmitter.
 
     dtype : tf.Dtype
         Defines the datatype for internal calculations and the output

@@ -136,12 +136,6 @@ class OFDMDetector(Layer):
         y_dt = tf.transpose(y_eff, [0, 1, 3, 4, 2])
         y_dt = tf.cast(y_dt, self._dtype)
 
-        # Transpose y_eff to put num_rx_ant last. New shape:
-        # [batch_size, num_rx, num_ofdm_symbols,...
-        #  ..., num_effective_subcarriers, num_rx_ant]
-        y_dt = tf.transpose(y_eff, [0, 1, 3, 4, 2])
-        y_dt = tf.cast(y_dt, self._dtype)
-
         ##############################################
         ### Prepare the err_var for MIMO detection ###
         ##############################################
@@ -163,7 +157,7 @@ class OFDMDetector(Layer):
         perm = [1, 3, 4, 0, 2, 5, 6]
         h_dt = tf.transpose(h_hat, perm)
 
-        # Flatten first tthree dimensions:
+        # Flatten first three dimensions:
         # [num_rx*num_tx*num_streams_per_tx, batch_size, num_rx_ant, ...
         #  ..., num_ofdm_symbols, num_effective_subcarriers]
         h_dt = flatten_dims(h_dt, 3, 0)
@@ -233,7 +227,7 @@ class OFDMDetector(Layer):
         # If output is symbols with hard decision, the rank is 5 and not 6 as
         # for other cases. The tensor rank is therefore expanded with one extra
         # dimension, which is removed later.
-        rank_extanded = len(z.shape) < 6
+        rank_expanded = len(z.shape) < 6
         z = expand_to_rank(z, 6, -1)
 
         # Transpose tensor to shape
@@ -282,7 +276,7 @@ class OFDMDetector(Layer):
         if self._output == 'bit':
             z = flatten_dims(z, 2, 3)
         # Remove dummy dimension if output is symbols with hard decision
-        if rank_extanded:
+        if rank_expanded:
             z = tf.squeeze(z, axis=-1)
 
         return z
