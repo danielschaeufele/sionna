@@ -1159,6 +1159,7 @@ def check_pusch_configs(pusch_configs):
 
     # Create dictionary with extracted configuration parameters
     pc = pusch_configs[0]
+    pc.tb.transform_precoding = pc.transform_precoding
     carrier = pc.carrier
 
     params = {
