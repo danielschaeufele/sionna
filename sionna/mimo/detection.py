@@ -102,6 +102,7 @@ class LinearDetector(Layer):
                  constellation=None,
                  hard_out=False,
                  post_equalizer_transformation=None,
+                 custom_demapper=None,
                  dtype=tf.complex64,
                  **kwargs):
         super().__init__(dtype=dtype, **kwargs)
@@ -132,7 +133,9 @@ class LinearDetector(Layer):
         self._constellation = constellation
 
         # Determine the demapper to use
-        if output=="bit":
+        if custom_demapper:
+            self._demapper = custom_demapper
+        elif output=="bit":
             self._demapper = Demapper(demapping_method,
                                       constellation=constellation,
                                       hard_out=hard_out,

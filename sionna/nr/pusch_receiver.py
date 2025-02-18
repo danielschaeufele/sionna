@@ -138,6 +138,7 @@ class PUSCHReceiver(Layer):
                  stream_management=None,
                  input_domain="freq",
                  l_min=None,
+                 custom_demapper=None,
                  dtype=tf.complex64,
                  **kwargs):
         assert dtype in [tf.complex64, tf.complex128], \
@@ -208,6 +209,7 @@ class PUSCHReceiver(Layer):
                                                  "qam",
                                                  pusch_transmitter._num_bits_per_symbol,
                                                  post_equalizer_transformation=transformation,
+                                                 custom_demapper=custom_demapper,
                                                  dtype=dtype)
         else:
             # User-provided MIMO detector

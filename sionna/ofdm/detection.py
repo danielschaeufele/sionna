@@ -878,6 +878,7 @@ class LinearDetector(OFDMDetector):
                  constellation=None,
                  hard_out=False,
                  post_equalizer_transformation=None,
+                 custom_demapper=None,
                  dtype=tf.complex64,
                  **kwargs):
 
@@ -890,6 +891,7 @@ class LinearDetector(OFDMDetector):
                                    constellation=constellation,
                                    hard_out=hard_out,
                                    post_equalizer_transformation=post_equalizer_transformation,
+                                   custom_demapper=custom_demapper,
                                    dtype=dtype,
                                    **kwargs)
 
