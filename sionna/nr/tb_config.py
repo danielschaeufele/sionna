@@ -374,6 +374,28 @@ class TBConfig(Config):
             """transform_precoding must be bool"""
         self._transform_precoding = value
 
+    @property
+    def target_coderate_override(self):
+        self._ifndef("target_coderate_override", None)
+        return self._target_coderate_override
+
+    @target_coderate_override.setter
+    def target_coderate_override(self, value):
+        assert value is None or (isinstance(value, float) and 0. < value < 1.), \
+            "target_coderate_override must be None or float between 0 and 1"
+        self._target_coderate_override = value
+
+    @property
+    def num_bits_per_symbol_override(self):
+        self._ifndef("num_bits_per_symbol_override", None)
+        return self._num_bits_per_symbol_override
+
+    @num_bits_per_symbol_override.setter
+    def num_bits_per_symbol_override(self, value):
+        assert value is None or value in [1, 2, 4, 6, 8, 10], \
+            "num_bits_per_symbol_override must be None or one of [1, 2, 4, 6, 8, 10]"
+        self._num_bits_per_symbol_override = value
+
     ###
     ### Derived (read-only) parameters
     ###
@@ -387,6 +409,8 @@ class TBConfig(Config):
         r"""
         float, read-only: Target coderate of the TB as defined by the selected
         MCS"""
+        if self.target_coderate_override is not None:
+            return self.target_coderate_override
         _, r = select_mcs(self._mcs_index,
                           self._mcs_table,
                           channel_type=self._channel_type,
@@ -397,6 +421,8 @@ class TBConfig(Config):
     def num_bits_per_symbol(self):
         r"""
         int, read-only: Modulation order as defined by the selected MCS"""
+        if self.num_bits_per_symbol_override is not None:
+            return self.num_bits_per_symbol_override
         m, _ = select_mcs(self._mcs_index,
                           self._mcs_table,
                           channel_type=self._channel_type,
