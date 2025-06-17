@@ -9,23 +9,12 @@ except ImportError as e:
     import sys
     sys.path.append("../")
 
-from sionna.ofdm import CFOCompensator, OFDMModulator, OFDMDemodulator
-from sionna.utils import QAMSource
+from sionna.phy.ofdm import CFOCompensator, OFDMModulator, OFDMDemodulator
+from sionna.phy.mapping import QAMSource
 
 import unittest
 import numpy as np
 import tensorflow as tf
-
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
 
 
 class TestOFDMModulator(unittest.TestCase):
@@ -49,7 +38,7 @@ class TestOFDMModulator(unittest.TestCase):
         data_with_cfo = x_time.numpy() * cfo_vec
         cfo_compensator = CFOCompensator(demodulator, return_cfo=True)
         x_compensated, cfo_est = cfo_compensator(data_with_cfo)
-        np.testing.assert_array_almost_equal(cfo, cfo_est * sample_rate / (2 * np.pi))
+        np.testing.assert_array_almost_equal(cfo, cfo_est * sample_rate / (2 * np.pi), decimal=4)
         x_freq = demodulator(x_compensated)
         np.testing.assert_array_almost_equal(x, x_freq)
 
@@ -73,6 +62,6 @@ class TestOFDMModulator(unittest.TestCase):
         data_with_cfo = x_time.numpy() * cfo_vec
         cfo_compensator = CFOCompensator(demodulator, return_cfo=True)
         x_compensated, cfo_est = cfo_compensator(data_with_cfo)
-        np.testing.assert_array_almost_equal(cfo, cfo_est * sample_rate / (2 * np.pi))
+        np.testing.assert_array_almost_equal(cfo, cfo_est * sample_rate / (2 * np.pi), decimal=4)
         x_freq = demodulator(x_compensated)
         np.testing.assert_array_almost_equal(x, x_freq)

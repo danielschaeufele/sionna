@@ -1,39 +1,16 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-
-from sionna.channel import GenerateFlatFadingChannel, ApplyFlatFadingChannel, FlatFadingChannel, exp_corr_mat, KroneckerModel
-from sionna.utils import QAMSource
-
-import pytest
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 import unittest
-import warnings
 import numpy as np
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
+from sionna.phy.channel import GenerateFlatFadingChannel, ApplyFlatFadingChannel, FlatFadingChannel, exp_corr_mat, KroneckerModel
+from sionna.phy.mapping import QAMSource
 
 class TestGenerateFlatFading(unittest.TestCase):
     """Unittest for GenerateFlatFading"""
 
     def test_without_spatial_correlation(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         batch_size = 128
@@ -41,13 +18,11 @@ class TestGenerateFlatFading(unittest.TestCase):
         h = gen_chn(batch_size)
         self.assertEqual(h.shape, [batch_size, num_rx_ant, num_tx_ant])
         self.assertEqual(h.dtype, tf.complex64)
-        gen_chn = GenerateFlatFadingChannel(num_tx_ant, num_rx_ant, dtype=tf.complex128)
+        gen_chn = GenerateFlatFadingChannel(num_tx_ant, num_rx_ant, precision="double")
         h = gen_chn(batch_size)
         self.assertEqual(h.dtype, tf.complex128)
 
     def test_with_spatial_correlation(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         r_tx = exp_corr_mat(0.4, num_tx_ant)
@@ -73,8 +48,6 @@ class TestGenerateFlatFading(unittest.TestCase):
         self.assertTrue(np.allclose(r_rx, r_rx_hat, atol=1e-3))
 
     def test_property_setter(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         r_tx = exp_corr_mat(0.4, num_tx_ant)
@@ -103,8 +76,6 @@ class TestGenerateFlatFading(unittest.TestCase):
 class TestGenerateApplyFading(unittest.TestCase):
     """Unittest for ApplyFlatFading"""
     def test_without_noise(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         batch_size = 24
@@ -112,15 +83,13 @@ class TestGenerateApplyFading(unittest.TestCase):
         r_rx = exp_corr_mat(0.99, num_rx_ant)
         kron = KroneckerModel(r_tx, r_rx)
         gen_chn = GenerateFlatFadingChannel(num_tx_ant, num_rx_ant, spatial_corr=kron)
-        app_chn = ApplyFlatFadingChannel(add_awgn=False)
+        app_chn = ApplyFlatFadingChannel()
         h = gen_chn(batch_size)
         x = QAMSource(4)([batch_size, num_tx_ant])
-        y = app_chn([x, h])
+        y = app_chn(x, h)
         self.assertTrue(np.array_equal(y, tf.squeeze(tf.matmul(h, tf.expand_dims(x, -1)))))
 
     def test_with_noise(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         batch_size = 100000
@@ -128,11 +97,11 @@ class TestGenerateApplyFading(unittest.TestCase):
         r_rx = exp_corr_mat(0.99, num_rx_ant)
         kron = KroneckerModel(r_tx, r_rx)
         gen_chn = GenerateFlatFadingChannel(num_tx_ant, num_rx_ant, spatial_corr=kron)
-        app_chn = ApplyFlatFadingChannel(add_awgn=True)
+        app_chn = ApplyFlatFadingChannel()
         h = gen_chn(batch_size)
         x = QAMSource(4)([batch_size, num_tx_ant])
         no = 0.1
-        y = app_chn([x, h, no])
+        y = app_chn(x, h, no)
         n = y - tf.squeeze(tf.matmul(h, tf.expand_dims(x, -1)))
         noise_var = np.var(n)
         self.assertAlmostEqual(no, noise_var, places=3)
@@ -140,68 +109,60 @@ class TestGenerateApplyFading(unittest.TestCase):
 class TestFlatFadingChannel(unittest.TestCase):
     """Unittest for FlatFading"""
     def test_without_noise(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         batch_size = 24
-        dtype=tf.complex128
-        r_tx = exp_corr_mat(0.4, num_tx_ant, dtype)
-        r_rx = exp_corr_mat(0.99, num_rx_ant, dtype)
+        precision="double"
+        r_tx = exp_corr_mat(0.4, num_tx_ant, precision=precision)
+        r_rx = exp_corr_mat(0.99, num_rx_ant, precision=precision)
         kron = KroneckerModel(r_tx, r_rx)
-        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, spatial_corr=kron, add_awgn=False, return_channel=True, dtype=dtype)
-        x = QAMSource(4, dtype=tf.complex128)([batch_size, num_tx_ant])
+        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, spatial_corr=kron, return_channel=True, precision=precision)
+        x = QAMSource(4, precision=precision)([batch_size, num_tx_ant])
         y, h = chn(x)
         self.assertTrue(np.array_equal(y, tf.squeeze(tf.matmul(h, tf.expand_dims(x, -1)))))
 
     def test_with_noise(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         batch_size = 100000
-        dtype=tf.complex128
-        r_tx = exp_corr_mat(0.4, num_tx_ant, dtype)
-        r_rx = exp_corr_mat(0.99, num_rx_ant, dtype)
+        precision="double"
+        r_tx = exp_corr_mat(0.4, num_tx_ant, precision=precision)
+        r_rx = exp_corr_mat(0.99, num_rx_ant, precision=precision)
         kron = KroneckerModel(r_tx, r_rx)
-        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, spatial_corr=kron, add_awgn=True, return_channel=True, dtype=dtype)
-        x = QAMSource(4, dtype=dtype)([batch_size, num_tx_ant])
+        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, spatial_corr=kron, return_channel=True, precision=precision)
+        x = QAMSource(4, precision=precision)([batch_size, num_tx_ant])
         no = 0.2
-        y, h = chn([x, no])
+        y, h = chn(x, no)
         n = y - tf.squeeze(tf.matmul(h, tf.expand_dims(x, -1)))
         noise_var = np.var(n)
         self.assertAlmostEqual(no, noise_var, places=3)
 
     def test_no_return_channel(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         batch_size = 1000000
         dtype=tf.complex64
-        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, add_awgn=True, return_channel=False, dtype=dtype)
+        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, return_channel=False, dtype=dtype)
         x = QAMSource(4, dtype=dtype)([batch_size, num_tx_ant])
         no = 0.2
-        y = chn([x, no])
+        y = chn(x, no)
         y_var = np.var(y)
         self.assertAlmostEqual(y_var , num_tx_ant + no, places=2)
 
     def test_property_setter(self):
-        tf.random.set_seed(1)
-        np.random.seed(1)
         num_tx_ant = 4
         num_rx_ant = 16
         r_tx = exp_corr_mat(0.4, num_tx_ant)
         r_rx = exp_corr_mat(0.99, num_rx_ant)
         kron = KroneckerModel(r_tx, r_rx)
-        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, add_awgn=True, return_channel=True)
+        chn = FlatFadingChannel(num_tx_ant, num_rx_ant, return_channel=True)
         qam_source = QAMSource(4)
         @tf.function()
         def func():
             chn.spatial_corr = kron
             x = qam_source([1000000, num_tx_ant])
             no = 0.2
-            y, h = chn([x, no])
+            y, h = chn(x, no)
             r_tx_hat = tf.reduce_mean(tf.matmul(h, h, adjoint_a=True), 0)
             r_rx_hat = tf.reduce_mean(tf.matmul(h, h, adjoint_b=True), 0)
             return r_tx_hat, r_rx_hat

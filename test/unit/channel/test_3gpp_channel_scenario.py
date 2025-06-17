@@ -1,27 +1,10 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
-
 import unittest
 import numpy as np
-import sionna
+from sionna.phy import channel
 from channel_test_utils import *
 
 
@@ -39,10 +22,10 @@ class TestScenario(unittest.TestCase):
     # Maximum allowed deviation for distance calculation (relative error)
     MAX_ERR = 1e-2
 
-    # Heigh of UTs
+    # Height of UTs
     H_UT = 1.5
 
-    # Heigh of BSs
+    # Height of BSs
     H_BS = 10.0
 
     # Number of BS
@@ -53,9 +36,6 @@ class TestScenario(unittest.TestCase):
 
     def setUp(self):
 
-        # Forcing the seed to make the tests deterministic
-        tf.random.set_seed(42)
-
         batch_size = TestScenario.BATCH_SIZE
         nb_bs = TestScenario.NB_BS
         nb_ut = TestScenario.NB_UT
@@ -65,18 +45,18 @@ class TestScenario(unittest.TestCase):
 
         # UT and BS arrays have no impact on LSP
         # However, these are needed to instantiate the model
-        bs_array = sionna.channel.tr38901.PanelArray(num_rows_per_panel=2,
-                                                    num_cols_per_panel=2,
-                                                    polarization='dual',
-                                                    polarization_type='VH',
-                                                    antenna_pattern='38.901',
-                                                    carrier_frequency=fc)
-        ut_array = sionna.channel.tr38901.PanelArray(num_rows_per_panel=1,
-                                                    num_cols_per_panel=1,
-                                                    polarization='dual',
-                                                    polarization_type='VH',
-                                                    antenna_pattern='38.901',
-                                                    carrier_frequency=fc)
+        bs_array = channel.tr38901.PanelArray(num_rows_per_panel=2,
+                                              num_cols_per_panel=2,
+                                              polarization='dual',
+                                              polarization_type='VH',
+                                              antenna_pattern='38.901',
+                                              carrier_frequency=fc)
+        ut_array = channel.tr38901.PanelArray(num_rows_per_panel=1,
+                                              num_cols_per_panel=1,
+                                              polarization='dual',
+                                              polarization_type='VH',
+                                              antenna_pattern='38.901',
+                                              carrier_frequency=fc)
 
         # The following quantities have no impact on LSP
         # However,these are needed to instantiate the model
@@ -84,8 +64,8 @@ class TestScenario(unittest.TestCase):
         bs_orientations = tf.zeros([batch_size, nb_ut])
         ut_velocities = tf.zeros([batch_size, nb_ut])
 
-        self.scenario = sionna.channel.tr38901.RMaScenario(fc, ut_array,
-                                                           bs_array, "uplink")
+        self.scenario = channel.tr38901.RMaScenario(fc, ut_array,
+                                                    bs_array, "uplink")
 
         ut_loc = generate_random_loc(batch_size, nb_ut, (100,2000),
                                      (100,2000), (h_ut, h_ut))

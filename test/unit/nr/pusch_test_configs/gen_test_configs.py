@@ -1,7 +1,6 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 """Script to generate config files for the PUSCHTransmitter tests
 """
 import json
@@ -12,6 +11,7 @@ except ImportError as e:
     import sys
     sys.path.append("../../../../")
 import sionna
+from sionna.phy import config
 
 def gen_config_file(filename,
                     n_cell_id,
@@ -60,10 +60,10 @@ def gen_config_file(filename,
     }
     }
     
-    num_bits_per_symbol, target_code_rate = sionna.nr.utils.select_mcs(config["pusch"]["tb"]["mcs_index"],
+    num_bits_per_symbol, target_code_rate = sionna.phy.nr.utils.decode_mcs_index(config["pusch"]["tb"]["mcs_index"],
                                                                    config["pusch"]["tb"]["mcs_table"])
-    config["pusch"]["tb"]["num_bits_per_symbol"] = num_bits_per_symbol
-    config["pusch"]["tb"]["target_code_rate"] = target_code_rate
+    config["pusch"]["tb"]["num_bits_per_symbol"] = num_bits_per_symbol.numpy()
+    config["pusch"]["tb"]["target_code_rate"] = target_code_rate.numpy()
 
     json_object = json.dumps(config, indent=4)
     with open(filename + ".json", "w") as outfile:
@@ -82,13 +82,13 @@ for n_size_bwp in [40, 273]:
                     min_cdm_groups = 1 if num_antenna_ports<4 else 2
                     for num_cdm_groups_without_data in range(min_cdm_groups,max_cdm_groups+1):
                         filename = f"test_{i}"
-                        n_cell_id = np.random.randint(0, 1008)
-                        slot_number = np.random.randint(0, 10)
-                        n_rnti = np.random.randint(0, 65536)
+                        n_cell_id = config.np_rng.integers(0, 1008)
+                        slot_number = config.np_rng.integers(0, 10)
+                        n_rnti = config.np_rng.integers(0, 65536)
                         tpmi = 2
                         additional_position = 1
-                        n_scid = np.random.randint(0, 2)
-                        n_id = np.random.randint(0, 65536)
+                        n_scid = config.np_rng.integers(0, 2)
+                        n_id = config.np_rng.integers(0, 65536)
                         mcs_index = 14
                         mcs_table = 1
                         gen_config_file(filename,

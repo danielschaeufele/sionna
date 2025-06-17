@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 # Contributing to Sionna
@@ -10,7 +10,7 @@ For enhancement, bugfix, or change requests, please open an issue.
 ## Pull requests
 Creating a pull request requires the following steps:
 
-1. Fork the repository and create your branch from `stable`.
+1. Fork the repository and create your branch from `main`.
 2. Add new tests if needed in the ``test`` folder.
 3. Lint your code (``make lint``).
 4. Ensure that all tests pass (``make test``).

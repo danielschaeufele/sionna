@@ -1,36 +1,21 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-from numpy.lib.npyio import load
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 
+import pytest
 import unittest
 import scipy as sp
 import numpy as np
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
+from sionna.phy.fec.linear import LinearEncoder
+from sionna.phy.fec.utils import GaussianPriorSource, load_parity_check_examples, pcm2gm
+from sionna.phy.fec.linear import OSDecoder
+from sionna.phy.utils import ebnodb2no, sim_ber
+from sionna.phy.channel.awgn import AWGN
+from sionna.phy.mapping import Mapper, Demapper, BinarySource
+from sionna.phy import Block
 
-from sionna.fec.utils import GaussianPriorSource, LinearEncoder, load_parity_check_examples, pcm2gm
-from sionna.fec.linear import OSDecoder
-from sionna.utils import BinarySource, ebnodb2no, sim_ber
-from sionna.channel.awgn import AWGN
-from sionna.mapping import Mapper, Demapper
-
-class System_Model(tf.keras.Model):
+class System_Model(Block):
     """System model for channel coding BER simulations.
     """
     def __init__(self,
@@ -56,8 +41,8 @@ class System_Model(tf.keras.Model):
         b = self.source([batch_size, self.encoder.k])
         c = self.encoder(b)
         x = self.mapper(c)
-        y = self.channel([x, no])
-        llr_ch = self.demapper([y, no])
+        y = self.channel(x, no)
+        llr_ch = self.demapper(y, no)
         c_hat = self.decoder(llr_ch)
         return c, c_hat
 
@@ -124,15 +109,17 @@ class TestOSD(unittest.TestCase):
         gm = pcm2gm(pcm)
 
         # only floating point is currently supported
-        dt = [tf.float16, tf.float32, tf.float64]
+        dt = [tf.float32, tf.float64]
+        precisions = ["single", "double"]
+
         shape = [100, n]
         source = GaussianPriorSource()
 
-        for d_in in dt:
-            for d_out in dt:
-                dec = OSDecoder(gm, dtype=d_out)
+        for dt_in in dt:
+            for prec, d_out in zip(precisions, dt):
+                dec = OSDecoder(gm, precision=prec)
                 # variable input dtype
-                llr_ch = tf.cast(source((shape, 0.1)), d_in)
+                llr_ch = tf.cast(source(shape, 0.1), dt_in)
                 c = dec(llr_ch)
                 # output dtype must be as specified
                 self.assertTrue(c.dtype==d_out)
@@ -163,6 +150,7 @@ class TestOSD(unittest.TestCase):
             pcm[3,27] = 2
             dec = OSDecoder(pcm, is_pcm=True)
 
+    @pytest.mark.usefixtures("only_gpu")
     def test_tf_fun(self):
         """Test that graph and XLA mode are supported."""
 
@@ -181,7 +169,7 @@ class TestOSD(unittest.TestCase):
         dec = OSDecoder(pcm, is_pcm=True)
         source = GaussianPriorSource()
 
-        u = source(([bs, n], 0.1))
+        u = source([bs, n], 0.1)
         run_graph(u)
         run_graph_xla(u)
 
@@ -193,12 +181,12 @@ class TestOSD(unittest.TestCase):
         id = 3
         pcm, _, n, _ = load_parity_check_examples(id)
         # test different shapes
-        shapes =[[10, 20, 30, n], [1, 40, n], [10, 2, 3, 4, 3, n]]
+        shapes =[[n],[10, 20, 30, n], [1, 40, n], [10, 2, 3, 4, 3, n]]
         dec = OSDecoder(pcm, is_pcm=True, t=2)
         source = GaussianPriorSource()
 
         for s in shapes:
-            llr = source((s, 0.2))
+            llr = source(s, 0.2)
             llr_ref = tf.reshape(llr, [-1, n])
 
             c = dec(llr) # encode with shape s
@@ -207,26 +195,7 @@ class TestOSD(unittest.TestCase):
             c_ref = tf.reshape(c_ref, s)
             self.assertTrue(np.array_equal(c.numpy(), c_ref.numpy()))
 
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-        bs = 10
-        id = 2
-        pcm, k, n, _ = load_parity_check_examples(id)
-
-        source = GaussianPriorSource()
-
-        # define keras model
-        inputs = tf.keras.Input(shape=(n), dtype=tf.float32)
-        dec = OSDecoder(pcm, is_pcm=True)(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=dec)
-
-        b = source(([bs, n], 0.1))
-        model(b)
-        # call twice to see that batch_size can change
-        b2 = source(([bs+1,n], 0.1))
-        model(b2)
-        model.summary()
-
+    @pytest.mark.usefixtures("only_gpu")
     def test_reference(self):
         """Test against reference implementations.
 

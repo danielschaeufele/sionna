@@ -1,31 +1,15 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
-
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
+import pytest
 import unittest
 import numpy as np
-import sionna
-from channel_test_utils import *
 from scipy.stats import kstest
+import tensorflow as tf
+from sionna.phy import config, channel, PI
+from channel_test_utils import *
 
-
+@pytest.mark.usefixtures("only_gpu")
 class TestRays(unittest.TestCase):
     r"""Test the rays generated for 3GPP system level simulations
     """
@@ -39,48 +23,44 @@ class TestRays(unittest.TestCase):
     # Maximum allowed deviation for distance calculation (relative error)
     MAX_ERR = 3e-2
 
-    # Heigh of UTs
+    # Height of UTs
     H_UT = 1.5
 
-    # Heigh of BSs
+    # Height of BSs
     H_BS = 35.0
 
     def setUpClass():
         r"""Sample rays from all LoS and NLoS channel models for testing"""
-
-        # Forcing the seed to make the tests deterministic
-        tf.random.set_seed(42)
-        np.random.seed(42)
 
         batch_size = TestRays.BATCH_SIZE
         fc = TestRays.CARRIER_FREQUENCY
 
         # UT and BS arrays have no impact on LSP
         # However, these are needed to instantiate the model
-        bs_array = sionna.channel.tr38901.PanelArray(num_rows_per_panel=1,
-                                                    num_cols_per_panel=1,
-                                                    polarization='single',
-                                                    polarization_type='V',
-                                                    antenna_pattern='38.901',
-                                                    carrier_frequency=fc,
-                                                    dtype=tf.complex128)
-        ut_array = sionna.channel.tr38901.PanelArray(num_rows_per_panel=1,
-                                                    num_cols_per_panel=1,
-                                                    polarization='single',
-                                                    polarization_type='V',
-                                                    antenna_pattern='38.901',
-                                                    carrier_frequency=fc,
-                                                    dtype=tf.complex128)
+        bs_array = channel.tr38901.PanelArray(num_rows_per_panel=1,
+                                              num_cols_per_panel=1,
+                                              polarization='single',
+                                              polarization_type='V',
+                                              antenna_pattern='38.901',
+                                              carrier_frequency=fc,
+                                              precision="double")
+        ut_array = channel.tr38901.PanelArray(num_rows_per_panel=1,
+                                              num_cols_per_panel=1,
+                                              polarization='single',
+                                              polarization_type='V',
+                                              antenna_pattern='38.901',
+                                              carrier_frequency=fc,
+                                              precision="double")
 
         # The following quantities have no impact on the rays, but are
         # required to instantiate models
-        ut_orientations = tf.random.uniform([batch_size, 1, 3],
-                                            -sionna.PI, sionna.PI,
+        ut_orientations = config.tf_rng.uniform([batch_size, 1, 3],
+                                            -PI, PI,
                                             dtype=tf.float64)
-        bs_orientations = tf.random.uniform([batch_size, 1, 3],
-                                            -sionna.PI, sionna.PI,
+        bs_orientations = config.tf_rng.uniform([batch_size, 1, 3],
+                                            -PI, PI,
                                             dtype=tf.float64)
-        ut_velocities = tf.random.uniform([batch_size, 1, 3], -1.0, 1.0,
+        ut_velocities = config.tf_rng.uniform([batch_size, 1, 3], -1.0, 1.0,
                                             dtype=tf.float64)
 
         # 1 UT and 1 BS
@@ -105,7 +85,7 @@ class TestRays(unittest.TestCase):
         TestRays.k = np.power(10.0, 7./10.)
         k_ = tf.fill([batch_size, 1, 1], tf.cast(TestRays.k, tf.float64))
         sf_ = tf.zeros([batch_size, 1, 1], tf.float64)
-        lsp = sionna.channel.tr38901.LSP(ds_, asd_, asa_, sf_, k_, zsa_, zsd_)
+        lsp = channel.tr38901.LSP(ds_, asd_, asa_, sf_, k_, zsa_, zsd_)
 
         # Store the sampled rays
         TestRays.delays = {}
@@ -136,10 +116,10 @@ class TestRays(unittest.TestCase):
         TestRays.los_zoa['rma'] = {}
         TestRays.los_zod['rma'] = {}
         TestRays.mu_log_zsd['rma'] = {}
-        scenario = sionna.channel.tr38901.RMaScenario(fc, ut_array, bs_array,
-                                                        "downlink",
-                                                        dtype=tf.complex128)
-        ray_sampler = sionna.channel.tr38901.RaysGenerator(scenario)
+        scenario = channel.tr38901.RMaScenario(fc, ut_array, bs_array,
+                                               "downlink",
+                                               precision="double")
+        ray_sampler = channel.tr38901.RaysGenerator(scenario)
 
         #### LoS
         in_state = generate_random_bool(batch_size, 1, 0.0)
@@ -215,11 +195,11 @@ class TestRays(unittest.TestCase):
         TestRays.los_zoa['umi'] = {}
         TestRays.los_zod['umi'] = {}
         TestRays.mu_log_zsd['umi'] = {}
-        scenario = sionna.channel.tr38901.UMiScenario(  fc, 'low',
-                                                        ut_array, bs_array,
-                                                        "downlink",
-                                                        dtype=tf.complex128)
-        ray_sampler = sionna.channel.tr38901.RaysGenerator(scenario)
+        scenario = channel.tr38901.UMiScenario(fc, "low",
+                                               ut_array, bs_array,
+                                               "downlink",
+                                               precision="double")
+        ray_sampler = channel.tr38901.RaysGenerator(scenario)
 
         #### LoS
         in_state = generate_random_bool(batch_size, 1, 0.0)
@@ -295,11 +275,11 @@ class TestRays(unittest.TestCase):
         TestRays.los_zoa['uma'] = {}
         TestRays.los_zod['uma'] = {}
         TestRays.mu_log_zsd['uma'] = {}
-        scenario = sionna.channel.tr38901.UMaScenario(  fc, 'low',
-                                                        ut_array, bs_array,
-                                                        "downlink",
-                                                        dtype=tf.complex128)
-        ray_sampler = sionna.channel.tr38901.RaysGenerator(scenario)
+        scenario = channel.tr38901.UMaScenario(fc, "low",
+                                               ut_array, bs_array,
+                                               "downlink",
+                                               precision="double")
+        ray_sampler = channel.tr38901.RaysGenerator(scenario)
 
         #### LoS
         in_state = generate_random_bool(batch_size, 1, 0.0)

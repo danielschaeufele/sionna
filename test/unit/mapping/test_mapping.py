@@ -1,34 +1,19 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-import pytest
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
+
 import unittest
 import numpy as np
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
 from scipy.special import logsumexp
-from sionna.mapping import Constellation, Mapper, Demapper, DemapperWithPrior
-from sionna.mapping import SymbolDemapperWithPrior, SymbolDemapper
-from sionna.mapping import SymbolLogits2LLRsWithPrior, SymbolLogits2LLRs
-from sionna.mapping import SymbolLogits2Moments
-from sionna.mapping import LLRs2SymbolLogits
-from sionna.utils import BinarySource
-from sionna.channel import AWGN
+from sionna.phy import config
+from sionna.phy.mapping import Constellation, Mapper, Demapper
+from sionna.phy.mapping import SymbolDemapper
+from sionna.phy.mapping import SymbolLogits2LLRs
+from sionna.phy.mapping import SymbolLogits2Moments
+from sionna.phy.mapping import LLRs2SymbolLogits
+from sionna.phy.mapping import BinarySource
+from sionna.phy.channel import AWGN
 from scipy.special import softmax
 
 class TestMapper(unittest.TestCase):
@@ -49,21 +34,15 @@ class TestMapper(unittest.TestCase):
         x = m(binary_source([batch_size,2,3,num_symbols*num_bits_per_symbol]))
         self.assertEqual(x.shape, [batch_size,2,3,num_symbols])
 
-        with self.assertRaises(tf.errors.InvalidArgumentError):
-            x = m(binary_source([batch_size, num_symbols*num_bits_per_symbol-1]))
-
-        with self.assertRaises(tf.errors.InvalidArgumentError):
-            x = m(binary_source([num_symbols*num_bits_per_symbol]))
-
     def test_mappings(self):
         num_bits_per_symbol = 8
         b = np.zeros([2**num_bits_per_symbol, num_bits_per_symbol])
         for i in range(0, 2**num_bits_per_symbol):
-            b[i] = np.array(list(np.binary_repr(i,num_bits_per_symbol)), dtype=np.int16)
+            b[i] = np.array(list(np.binary_repr(i,num_bits_per_symbol)), dtype=np.int32)
         m = Mapper("qam", num_bits_per_symbol)
         x = m(b)
         for i, s in enumerate(x.numpy()):
-            self.assertEqual(s, m.constellation.points[i])
+            self.assertEqual(s, m.constellation()[i])
 
     def test_graph_mode(self):
         binary_source = BinarySource()
@@ -80,7 +59,7 @@ class TestMapper(unittest.TestCase):
 
         # double precision
 
-        mapper = Mapper("qam", 4, dtype=tf.complex64)
+        mapper = Mapper("qam", 4, precision="double")
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
@@ -103,23 +82,13 @@ class TestMapper(unittest.TestCase):
 
         # double precision
 
-        mapper = Mapper("qam", 4, dtype=tf.complex64)
+        mapper = Mapper("qam", 4, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             return mapper(b)
         self.assertEqual(run(100).shape, [100, 3, 100])
         self.assertEqual(run(400).shape, [400, 3, 100])
-
-    def test_model_mode(self):
-        binary_source = BinarySource()
-        constellation = Constellation("qam", 4)
-        inputs = tf.keras.Input(shape=(3, 400), dtype=tf.float32)
-        x = Mapper(constellation=constellation)(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=x)
-        model.compile()
-        self.assertEqual(model(binary_source([100, 3, 400])).shape, [100, 3, 100])
-        self.assertEqual(model(binary_source([400, 3, 400])).shape, [400, 3, 100])
 
     def test_symbol_ind_output(self):
         binary_source = BinarySource()
@@ -137,68 +106,71 @@ class TestDemapper(unittest.TestCase):
     def test_assert_demapping_method(self):
         c = Constellation("qam", 6)
         with self.assertRaises(AssertionError):
-            Demapper("asdfiu", c)
+            Demapper("asdfiu", constellation=c)
 
     def test_assert_non_broadcastable_dimensions(self):
-        c = Constellation("custom", 4)
+        points = config.tf_rng.normal([2**4])
+        c = Constellation("custom", 4, points=points)
         m = Mapper(constellation=c)
         d = Demapper("app", constellation=c)
-        b = tf.random.uniform([100, 50, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
+        b = config.tf_rng.uniform([100, 50, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([100, 50])
-            llr = d([x, no])
+            llr = d(x, no)
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([100, 1])
-            llr = d([x, no])
-
+            llr = d(x, no)
 
     def test_output_dimensions1(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([2**num_bits_per_symbol])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
             d = Demapper("app", constellation=c)
             batch_size = 99
             dim1 = 10
             dim2 = 12
-            b = tf.random.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            llr = d([x, 1.])
+            llr = d(x, 1.)
             self.assertEqual(llr.shape, [batch_size, dim1, dim2*num_bits_per_symbol])
 
     def test_output_dimensions2(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([2**num_bits_per_symbol])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
             d = Demapper("app", constellation=c)
             batch_size = 99
-            b = tf.random.uniform([batch_size, num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            llr = d([x, 1.])
+            llr = d(x, 1.)
             self.assertEqual(llr.shape, [batch_size, num_bits_per_symbol])
 
     def test_no_inputs(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([2**num_bits_per_symbol])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
             d = Demapper("app", constellation=c)
-            b = tf.random.uniform([100, 10, 50*num_bits_per_symbol],
+            b = config.tf_rng.uniform([100, 10, 50*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
             No = np.ones_like(x, dtype=np.float32)
-            llr = d([x, No])
+            llr = d(x, No)
             self.assertEqual(llr.shape, [100, 10, 50*num_bits_per_symbol])
 
             No = np.ones_like(x, dtype=np.float32)
-            llr = d([x, No])
+            llr = d(x, No)
             self.assertEqual(llr.shape, [100, 10, 50*num_bits_per_symbol])
 
             with self.assertRaises(tf.errors.InvalidArgumentError):
                 d = Demapper("app", constellation=c)
                 No = tf.constant(np.ones(x.shape[:-1]), dtype=tf.float32)
-                llr = d([x, No])
+                llr = d(x, No)
 
     def test_per_symbol_noise_variance(self):
         "Test LLRs with per symbol noise variance for APP/MAXLOG"
@@ -206,12 +178,12 @@ class TestDemapper(unittest.TestCase):
         m = Mapper("qam", num_bits_per_symbol)
         d_app = Demapper("app", "qam", num_bits_per_symbol)
         d_maxlog = Demapper("maxlog", "qam", num_bits_per_symbol)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
-        llr_app = d_app([x, No])
-        llr_maxlog = d_maxlog([x, No])
+        No = config.tf_rng.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
+        llr_app = d_app(x, No)
+        llr_maxlog = d_maxlog(x, No)
         p = d_app.constellation.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -232,12 +204,12 @@ class TestDemapper(unittest.TestCase):
         m = Mapper("qam", num_bits_per_symbol)
         d_app = Demapper("app", "qam", num_bits_per_symbol)
         d_maxlog = Demapper("maxlog", "qam", num_bits_per_symbol)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
-        llr_app = d_app([x, No])
-        llr_maxlog = d_maxlog([x, No])
+        No = config.tf_rng.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
+        llr_app = d_app(x, No)
+        llr_maxlog = d_maxlog(x, No)
         p = m.constellation.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -265,25 +237,25 @@ class TestDemapper(unittest.TestCase):
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
 
         # double precision
 
-        constellation = Constellation("qam", 4, dtype=tf.complex128)
-        mapper = Mapper(constellation=constellation, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = Demapper("app", constellation=constellation, dtype=tf.complex128)
+        constellation = Constellation("qam", 4, precision="double")
+        mapper = Mapper(constellation=constellation, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = Demapper("app", constellation=constellation, precision="double")
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
 
@@ -300,168 +272,154 @@ class TestDemapper(unittest.TestCase):
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
 
         # double precision
 
-        constellation = Constellation("qam", 4, dtype=tf.complex128)
-        mapper = Mapper(constellation=constellation, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = Demapper("app", constellation=constellation, dtype=tf.complex128)
+        constellation = Constellation("qam", 4, precision="double")
+        mapper = Mapper(constellation=constellation, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = Demapper("app", constellation=constellation, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
-
-    def test_model_mode(self):
-        binary_source = BinarySource()
-        constellation = Constellation("qam", 4)
-        mapper = Mapper(constellation=constellation)
-        awgn = AWGN()
-        demapper = Demapper("app", constellation=constellation)
-        b = tf.keras.Input(shape=(3, 400), dtype=tf.float32)
-        no = tf.keras.Input(shape=(3, 100), dtype=tf.float32)
-        x = mapper(b)
-        y = awgn([x, no])
-        llr = demapper([y, no])
-        model = tf.keras.Model(inputs=[b, no], outputs=llr)
-        model.compile()
-        in1 = binary_source([100, 3, 400])
-        in2 = tf.random.uniform([100, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2]).shape, [100, 3, 400])
-        in1 = binary_source([400, 3, 400])
-        in2 = tf.random.uniform([400, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2]).shape, [400, 3, 400])
 
 class TestDemapperWithPrior(unittest.TestCase):
     def test_assert_demapping_method(self):
         c = Constellation("qam", 6)
         with self.assertRaises(AssertionError):
-            DemapperWithPrior("asdfiu", c)
+            Demapper("asdfiu", constellation=c, with_prior=True)
 
     def test_assert_non_broadcastable_dimensions(self):
-        c = Constellation("custom", 4)
+        num_bits_per_symbol = 4
+        points = config.tf_rng.normal([2**num_bits_per_symbol])
+        c = Constellation("custom", num_bits_per_symbol, points=points)
         m = Mapper(constellation=c)
-        d = DemapperWithPrior("app", constellation=c)
-        b = tf.random.uniform([16, 50, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
+        d = Demapper("app", constellation=c, with_prior=True)
+        b = config.tf_rng.uniform([16, 50, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
         # Noise
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([16, 50])
-            p = tf.random.uniform([4])
-            llr = d([x, p, no])
+            p = config.tf_rng.uniform([4])
+            llr = d(x, no, p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([16, 1])
-            p = tf.random.uniform([4])
-            llr = d([x, p, no])
+            p = config.tf_rng.uniform([4])
+            llr = d(x, no, p)
         # prior
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([16, 50, 4])
-            llr = d([x, p, 1.0])
+            p = config.tf_rng.uniform([16, 50, 4])
+            llr = d(x, 1.0, p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([16, 50, 200])
-            llr = d([x, p, 1.0])
+            p = config.tf_rng.uniform([16, 50, 200])
+            llr = d(x, 1.0, p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([16, 1])
-            llr = d([x, p, 1.0])
+            p = config.tf_rng.uniform([16, 1])
+            llr = d(x, 1.0, p)
 
     def test_output_dimensions1(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([2**num_bits_per_symbol])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = DemapperWithPrior("app", constellation=c)
+            d = Demapper("app", constellation=c, with_prior=True)
             batch_size = 99
             dim1 = 10
             dim2 = 12
-            b = tf.random.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            p = tf.random.uniform([num_bits_per_symbol])
-            llr = d([x, p, 1.])
+            p = config.tf_rng.uniform([num_bits_per_symbol])
+            llr = d(x, 1., p)
             self.assertEqual(llr.shape, [batch_size, dim1, dim2*num_bits_per_symbol])
 
     def test_output_dimensions2(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([2**num_bits_per_symbol])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = DemapperWithPrior("app", constellation=c)
+            d = Demapper("app", constellation=c, with_prior=True)
             batch_size = 99
-            b = tf.random.uniform([batch_size, num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            p = tf.random.uniform([num_bits_per_symbol])
-            llr = d([x, p, 1.])
+            p = config.tf_rng.uniform([num_bits_per_symbol])
+            llr = d(x, 1., p)
             self.assertEqual(llr.shape, [batch_size, num_bits_per_symbol])
 
     def test_no_inputs(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([2**num_bits_per_symbol])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = DemapperWithPrior("app", constellation=c)
-            b = tf.random.uniform([100, 10, 50*num_bits_per_symbol],
+            d = Demapper("app", constellation=c, with_prior=True)
+            b = config.tf_rng.uniform([100, 10, 50*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
             No = np.ones_like(x, dtype=np.float32)
-            p = tf.random.uniform([num_bits_per_symbol])
-            llr = d([x, p, No])
+            p = config.tf_rng.uniform([num_bits_per_symbol])
+            llr = d(x, No, p)
             self.assertEqual(llr.shape, [100, 10, 50*num_bits_per_symbol])
 
             with self.assertRaises(tf.errors.InvalidArgumentError):
                 No = tf.constant(np.ones(x.shape[:-1]), dtype=tf.float32)
-                p = tf.random.uniform([num_bits_per_symbol])
-                llr = d([x, p, No])
+                p = config.tf_rng.uniform([num_bits_per_symbol])
+                llr = d(x, No, p)
 
     def test_prior_inputs(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([2**num_bits_per_symbol])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = DemapperWithPrior("app", constellation=c)
-            b = tf.random.uniform([100, 10, 50*num_bits_per_symbol],
+            d = Demapper("app", constellation=c, with_prior=True)
+            b = config.tf_rng.uniform([100, 10, 50*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
             No = np.ones_like(x, dtype=np.float32)
-            p = tf.random.uniform([100, 10, 50, num_bits_per_symbol])
-            llr = d([x, p, No])
+            p = config.tf_rng.uniform([100, 10, 50, num_bits_per_symbol])
+            llr = d(x, No, p)
             self.assertEqual(llr.shape, [100, 10, 50*num_bits_per_symbol])
 
             with self.assertRaises(tf.errors.InvalidArgumentError):
-                p = tf.random.uniform([100, 10, 49, num_bits_per_symbol])
-                llr = d([x, p, No])
+                p = config.tf_rng.uniform([100, 10, 49, num_bits_per_symbol])
+                llr = d(x, No, p)
 
     def test_per_symbol_noise_variance_and_prior(self):
         "Test LLRs with per symbol noise variance for APP/MAXLOG"
         num_bits_per_symbol = 6
         num_points = 2**num_bits_per_symbol
         m = Mapper("qam", num_bits_per_symbol)
-        d_app = DemapperWithPrior("app", "qam", num_bits_per_symbol)
-        d_maxlog = DemapperWithPrior("maxlog", "qam", num_bits_per_symbol)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        d_app = Demapper("app", "qam", num_bits_per_symbol, with_prior=True)
+        d_maxlog = Demapper("maxlog", "qam", num_bits_per_symbol, with_prior=True)
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
+        No = config.tf_rng.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
         # Precompute priors and probabilities on symbols
-        prior = tf.random.normal(tf.concat([x.shape, [num_bits_per_symbol]], axis=0))
+        prior = config.tf_rng.normal(tf.concat([x.shape, [num_bits_per_symbol]], axis=0))
         a = np.zeros([num_points, num_bits_per_symbol])
         for i in range(0, num_points):
             a[i,:] = np.array(list(np.binary_repr(i, num_bits_per_symbol)),
-                              dtype=np.int16)
+                              dtype=np.int32)
         a = 2*a-1
         a = np.expand_dims(a, axis=(0, 1))
         ps_exp = a*np.expand_dims(prior, axis=-2)
         ps_exp = ps_exp - np.log(1+np.exp(ps_exp)) # log(sigmoid(ps_exp))
         ps_exp = np.sum(ps_exp, axis=-1) # [batch size, block length, num points]
         #
-        llr_app = d_app([x, prior, No])
-        llr_maxlog = d_maxlog([x, prior, No])
+        llr_app = d_app(x, No, prior)
+        llr_maxlog = d_maxlog(x, No, prior)
         p = d_app.constellation.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -484,25 +442,25 @@ class TestDemapperWithPrior(unittest.TestCase):
         num_bits_per_symbol = 6
         num_points = 2**num_bits_per_symbol
         m = Mapper("qam", num_bits_per_symbol)
-        d_app = DemapperWithPrior("app", "qam", num_bits_per_symbol)
-        d_maxlog = DemapperWithPrior("maxlog", "qam", num_bits_per_symbol)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        d_app = Demapper("app", "qam", num_bits_per_symbol, with_prior=True)
+        d_maxlog = Demapper("maxlog", "qam", num_bits_per_symbol, with_prior=True)
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
+        No = config.tf_rng.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
         # Precompute priors and probabilities on symbols
-        prior = tf.random.normal([num_bits_per_symbol])
+        prior = config.tf_rng.normal([num_bits_per_symbol])
         a = np.zeros([num_points, num_bits_per_symbol])
         for i in range(0, num_points):
             a[i,:] = np.array(list(np.binary_repr(i, num_bits_per_symbol)),
-                              dtype=np.int16)
+                              dtype=np.int32)
         a = 2*a-1
         ps_exp = a*np.expand_dims(prior, axis=0)
         ps_exp = ps_exp - np.log(1+np.exp(ps_exp)) # log(sigmoid(ps_exp))
         ps_exp = np.sum(ps_exp, axis=-1) # [num points]
         #
-        llr_app = d_app([x, prior, No])
-        llr_maxlog = d_maxlog([x, prior, No])
+        llr_app = d_app(x, No, prior)
+        llr_maxlog = d_maxlog(x, No, prior)
         p = m.constellation.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -527,32 +485,32 @@ class TestDemapperWithPrior(unittest.TestCase):
         constellation = Constellation("qam", 4)
         mapper = Mapper(constellation=constellation)
         awgn = AWGN()
-        demapper = DemapperWithPrior("app", constellation=constellation)
+        demapper = Demapper("app", constellation=constellation, with_prior=True)
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            prior = tf.random.normal([4])
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            prior = config.tf_rng.normal([4])
+            y = awgn(x, no)
+            return demapper(y, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
 
         # double precision
 
-        constellation = Constellation("qam", 4, dtype=tf.complex128)
-        mapper = Mapper(constellation=constellation, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = DemapperWithPrior("app", constellation=constellation, dtype=tf.complex128)
+        constellation = Constellation("qam", 4, precision="double")
+        mapper = Mapper(constellation=constellation, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = Demapper("app", constellation=constellation, with_prior=True, precision="double")
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            prior = tf.random.normal([4], dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            prior = config.tf_rng.normal([4], dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(y, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
 
@@ -564,152 +522,135 @@ class TestDemapperWithPrior(unittest.TestCase):
         constellation = Constellation("qam", 4)
         mapper = Mapper(constellation=constellation)
         awgn = AWGN()
-        demapper = DemapperWithPrior("app", constellation=constellation)
+        demapper = Demapper("app", constellation=constellation, with_prior=True)
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            prior = tf.random.normal([4])
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            prior = config.tf_rng.normal([4])
+            y = awgn(x, no)
+            return demapper(y, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
 
         # double precision
 
-        constellation = Constellation("qam", 4, dtype=tf.complex128)
-        mapper = Mapper(constellation=constellation, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = DemapperWithPrior("app", constellation=constellation, dtype=tf.complex128)
+        constellation = Constellation("qam", 4, precision="double")
+        mapper = Mapper(constellation=constellation, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = Demapper("app", constellation=constellation, with_prior=True, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            prior = tf.random.normal([4], dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            prior = config.tf_rng.normal([4], dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(y, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 400])
         self.assertEqual(run(400).shape, [400, 3, 400])
-
-    def test_model_mode(self):
-        binary_source = BinarySource()
-        constellation = Constellation("qam", 4)
-        mapper = Mapper(constellation=constellation)
-        awgn = AWGN()
-        demapper = DemapperWithPrior("app", constellation=constellation)
-        b = tf.keras.Input(shape=(3, 400), dtype=tf.float32)
-        no = tf.keras.Input(shape=(3, 100), dtype=tf.float32)
-        prior = tf.keras.Input(shape=(4), dtype=tf.float32)
-        x = mapper(b)
-        y = awgn([x, no])
-        llr = demapper([y, prior, no])
-        model = tf.keras.Model(inputs=[b, prior, no], outputs=llr)
-        model.compile()
-        in1 = binary_source([100, 3, 400])
-        in2 = tf.random.normal([4])
-        in3 = tf.random.uniform([100, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2, in3]).shape, [100, 3, 400])
-        in1 = binary_source([400, 3, 400])
-        in2 = tf.random.normal([4])
-        in3 = tf.random.uniform([400, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2, in3]).shape, [400, 3, 400])
 
 class TestSymbolDemapperWithPrior(unittest.TestCase):
 
     def test_assert_non_broadcastable_dimensions(self):
-        c = Constellation("custom", 4)
+        num_bits_per_symbol = 4
+        points = config.tf_rng.normal([2**num_bits_per_symbol])
+        c = Constellation("custom", num_bits_per_symbol, points=points)
         m = Mapper(constellation=c)
-        d = SymbolDemapperWithPrior(constellation=c)
-        b = tf.random.uniform([64, 10, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
+        d = SymbolDemapper(constellation=c, with_prior=True)
+        b = config.tf_rng.uniform([64, 10, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
         # Noise
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([64, 9])
-            p = tf.random.uniform([16])
-            logits = d([x, p, no])
+            p = config.tf_rng.uniform([16])
+            logits = d(x, no, p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([32, 10])
-            p = tf.random.uniform([16])
-            logits = d([x, p, no])
+            p = config.tf_rng.uniform([16])
+            logits = d(x, no, p)
         # prior
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([64, 10, 16])
-            logits = d([x, p, 1.0])
+            p = config.tf_rng.uniform([64, 10, 16])
+            logits = d(x, 1., p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([64, 10, 50])
-            logits = d([x, p, 1.0])
+            p = config.tf_rng.uniform([64, 10, 50])
+            logits = d(x, 1., p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([64])
-            logits = d([x, p, 1.0])
+            p = config.tf_rng.uniform([64])
+            logits = d(x, 1., p)
 
     def test_output_dimensions1(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             num_points = 2**num_bits_per_symbol
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([num_points])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = SymbolDemapperWithPrior(constellation=c)
+            d = SymbolDemapper(constellation=c, with_prior=True)
             batch_size = 32
             dim1 = 10
             dim2 = 12
-            b = tf.random.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            p = tf.random.uniform([num_points])
-            logits = d([x, p, 1.])
+            p = config.tf_rng.uniform([num_points])
+            logits = d(x, 1., p)
             self.assertEqual(logits.shape, [batch_size, dim1, dim2, num_points])
 
     def test_output_dimensions2(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             num_points = 2**num_bits_per_symbol
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([num_points])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = SymbolDemapperWithPrior(constellation=c)
+            d = SymbolDemapper(constellation=c, with_prior=True)
             batch_size = 32
-            b = tf.random.uniform([batch_size, num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            p = tf.random.uniform([num_points])
-            logits = d([x, p, 1.])
+            p = config.tf_rng.uniform([num_points])
+            logits = d(x, 1., p)
             self.assertEqual(logits.shape, [batch_size, 1, num_points])
 
     def test_no_inputs(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             num_points = 2**num_bits_per_symbol
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([num_points])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = SymbolDemapperWithPrior(constellation=c)
-            b = tf.random.uniform([100, 10, 50*num_bits_per_symbol],
+            d = SymbolDemapper(constellation=c, with_prior=True)
+            b = config.tf_rng.uniform([100, 10, 50*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
             No = np.ones_like(x, dtype=np.float32)
-            p = tf.random.uniform([num_points])
-            logits = d([x, p, No])
+            p = config.tf_rng.uniform([num_points])
+            logits = d(x, No, p)
             self.assertEqual(logits.shape, [100, 10, 50, num_points])
 
             with self.assertRaises(tf.errors.InvalidArgumentError):
                 No = tf.constant(np.ones(x.shape[1:]), dtype=tf.float32)
-                p = tf.random.uniform([num_points])
-                logits = d([x, p, No])
+                p = config.tf_rng.uniform([num_points])
+                logits = d(x, No, p)
 
     def test_prior_inputs(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             num_points = 2**num_bits_per_symbol
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([num_points])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
-            d = SymbolDemapperWithPrior(constellation=c)
-            b = tf.random.uniform([100, 10, 50*num_bits_per_symbol],
+            d = SymbolDemapper(constellation=c, with_prior=True)
+            b = config.tf_rng.uniform([100, 10, 50*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
             No = np.ones_like(x, dtype=np.float32)
-            p = tf.random.uniform([100, 10, 50, num_points])
-            logits = d([x, p, No])
+            p = config.tf_rng.uniform([100, 10, 50, num_points])
+            logits = d(x, No, p)
             self.assertEqual(logits.shape, [100, 10, 50, num_points])
 
             with self.assertRaises(tf.errors.InvalidArgumentError):
-                p = tf.random.uniform([100, 10, 49, num_points])
-                logits = d([x, p, No])
+                p = config.tf_rng.uniform([100, 10, 49, num_points])
+                logits = d(x, No, p)
 
     def test_per_symbol_noise_variance_and_prior(self):
         "Test LLRs with per symbol noise variance for APP/MAXLOG"
@@ -717,15 +658,15 @@ class TestSymbolDemapperWithPrior(unittest.TestCase):
         num_points = 2**num_bits_per_symbol
         c = Constellation("qam", num_bits_per_symbol)
         m = Mapper(constellation=c)
-        d = SymbolDemapperWithPrior(constellation=c)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        d = SymbolDemapper(constellation=c, with_prior=True)
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
+        No = config.tf_rng.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
         # Precompute priors and probabilities on symbols
-        prior = tf.random.normal(tf.concat([x.shape, [num_points]], axis=0))
+        prior = config.tf_rng.normal(tf.concat([x.shape, [num_points]], axis=0))
         #
-        logits = d([x, prior, No])
+        logits = d(x, No, prior)
         points = c.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -744,15 +685,15 @@ class TestSymbolDemapperWithPrior(unittest.TestCase):
         num_points = 2**num_bits_per_symbol
         c = Constellation("qam", num_bits_per_symbol)
         m = Mapper(constellation=c)
-        d = SymbolDemapperWithPrior(constellation=c)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        d = SymbolDemapper(constellation=c, with_prior=True)
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
+        No = config.tf_rng.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
         # Precompute priors and probabilities on symbols
-        prior = tf.random.normal([num_points])
+        prior = config.tf_rng.normal([num_points])
         #
-        logits = d([x, prior, No])
+        logits = d(x, No, prior)
         points = m.constellation.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -772,35 +713,35 @@ class TestSymbolDemapperWithPrior(unittest.TestCase):
 
         # simple precision
 
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex64)
-        mapper = Mapper(constellation=c, dtype=tf.complex64)
-        awgn = AWGN(dtype=tf.complex64)
-        demapper = SymbolDemapperWithPrior(constellation=c, dtype=tf.complex64)
+        c = Constellation("qam", num_bits_per_symbol)
+        mapper = Mapper(constellation=c)
+        awgn = AWGN()
+        demapper = SymbolDemapper(constellation=c, with_prior=True)
+
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            prior = tf.random.normal([num_points], dtype=tf.float32)
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            prior = config.tf_rng.normal([num_points], dtype=tf.float32)
+            y = awgn(x, no)
+            return demapper(x, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
 
         # double precision
-
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex128)
-        mapper = Mapper(constellation=c, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = SymbolDemapperWithPrior(constellation=c, dtype=tf.complex128)
+        c = Constellation("qam", num_bits_per_symbol, precision="double")
+        mapper = Mapper(constellation=c, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = SymbolDemapper(constellation=c, with_prior=True, precision="double")
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            prior = tf.random.normal([num_points], dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            prior = config.tf_rng.normal([num_points], dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(x, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
 
@@ -811,124 +752,104 @@ class TestSymbolDemapperWithPrior(unittest.TestCase):
 
         # simple precision
 
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex64)
-        mapper = Mapper(constellation=c, dtype=tf.complex64)
-        awgn = AWGN(dtype=tf.complex64)
-        demapper = SymbolDemapperWithPrior(constellation=c, dtype=tf.complex64)
+        c = Constellation("qam", num_bits_per_symbol)
+        mapper = Mapper(constellation=c)
+        awgn = AWGN()
+        demapper = SymbolDemapper(constellation=c, with_prior=True)
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            prior = tf.random.normal([num_points], dtype=tf.float32)
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            prior = config.tf_rng.normal([num_points], dtype=tf.float32)
+            y = awgn(x, no)
+            return demapper(x, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
 
         # double precision
 
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex128)
-        mapper = Mapper(constellation=c, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = SymbolDemapperWithPrior(constellation=c, dtype=tf.complex128)
+        c = Constellation("qam", num_bits_per_symbol, precision="double")
+        mapper = Mapper(constellation=c, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = SymbolDemapper(constellation=c, with_prior=True, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            prior = tf.random.normal([num_points], dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, prior, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            prior = config.tf_rng.normal([num_points], dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(x, no, prior)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
-
-    def test_model_mode(self):
-        num_bits_per_symbol = 4
-        num_points = 2**num_bits_per_symbol
-        binary_source = BinarySource()
-        constellation = Constellation("qam", num_bits_per_symbol)
-        mapper = Mapper(constellation=constellation)
-        awgn = AWGN()
-        demapper = SymbolDemapperWithPrior(constellation=constellation)
-        b = tf.keras.Input(shape=(3, 400), dtype=tf.float32)
-        no = tf.keras.Input(shape=(3, 100), dtype=tf.float32)
-        prior = tf.keras.Input(shape=(num_points), dtype=tf.float32)
-        x = mapper(b)
-        y = awgn([x, no])
-        llr = demapper([y, prior, no])
-        model = tf.keras.Model(inputs=[b, prior, no], outputs=llr)
-        model.compile()
-        in1 = binary_source([100, 3, 400])
-        in2 = tf.random.normal([num_points])
-        in3 = tf.random.uniform([100, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2, in3]).shape, [100, 3, 100, num_points])
-        in1 = binary_source([400, 3, 400])
-        in2 = tf.random.normal([num_points])
-        in3 = tf.random.uniform([400, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2, in3]).shape, [400, 3, 100, num_points])
 
 class TestSymbolDemapper(unittest.TestCase):
 
     def test_assert_non_broadcastable_dimensions(self):
-        c = Constellation("custom", 4)
+        num_bits_per_symbol = 4
+        points = config.tf_rng.normal([2**num_bits_per_symbol])
+        c = Constellation("custom", num_bits_per_symbol, points=points)
         m = Mapper(constellation=c)
         d = SymbolDemapper(constellation=c)
-        b = tf.random.uniform([64, 10, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
+        b = config.tf_rng.uniform([64, 10, 200], minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
         # Noise
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([64, 9])
-            logits = d([x, no])
+            logits = d(x, no)
         with self.assertRaises(tf.errors.InvalidArgumentError):
             no = tf.ones([32, 10])
-            p = tf.random.uniform([16])
-            logits = d([x, no])
+            p = config.tf_rng.uniform([16])
+            logits = d(x, no)
 
     def test_output_dimensions1(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             num_points = 2**num_bits_per_symbol
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([num_points])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
             d = SymbolDemapper(constellation=c)
             batch_size = 32
             dim1 = 10
             dim2 = 12
-            b = tf.random.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, dim1, dim2*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            logits = d([x, 1.])
+            logits = d(x, 1.)
             self.assertEqual(logits.shape, [batch_size, dim1, dim2, num_points])
 
     def test_output_dimensions2(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             num_points = 2**num_bits_per_symbol
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([num_points])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
             d = SymbolDemapper(constellation=c)
             batch_size = 32
-            b = tf.random.uniform([batch_size, num_bits_per_symbol],
+            b = config.tf_rng.uniform([batch_size, num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
-            logits = d([x, 1.])
+            logits = d(x, 1.)
             self.assertEqual(logits.shape, [batch_size, 1, num_points])
 
     def test_no_inputs(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             num_points = 2**num_bits_per_symbol
-            c = Constellation("custom", num_bits_per_symbol)
+            points = config.tf_rng.normal([num_points])
+            c = Constellation("custom", num_bits_per_symbol, points=points)
             m = Mapper(constellation=c)
             d = SymbolDemapper(constellation=c)
-            b = tf.random.uniform([100, 10, 50*num_bits_per_symbol],
+            b = config.tf_rng.uniform([100, 10, 50*num_bits_per_symbol],
                                 minval=0, maxval=2, dtype=tf.dtypes.int32)
             x = m(b)
             No = np.ones_like(x, dtype=np.float32)
-            logits = d([x, No])
+            logits = d(x, No)
             self.assertEqual(logits.shape, [100, 10, 50, num_points])
 
             with self.assertRaises(tf.errors.InvalidArgumentError):
                 No = tf.constant(np.ones(x.shape[1:]), dtype=tf.float32)
-                logits = d([x, No])
+                logits = d(x, No)
 
     def test_per_symbol_noise_variance(self):
         "Test LLRs with per symbol noise variance for APP/MAXLOG"
@@ -936,12 +857,12 @@ class TestSymbolDemapper(unittest.TestCase):
         c = Constellation("qam", num_bits_per_symbol)
         m = Mapper(constellation=c)
         d = SymbolDemapper(constellation=c)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
+        No = config.tf_rng.uniform(x.shape, minval=0.01, maxval=100, dtype=np.float32)
         #
-        logits = d([x, No])
+        logits = d(x, No)
         points = c.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -959,12 +880,12 @@ class TestSymbolDemapper(unittest.TestCase):
         c = Constellation("qam", num_bits_per_symbol)
         m = Mapper(constellation=c)
         d = SymbolDemapper(constellation=c)
-        b = tf.random.uniform([100, 10*num_bits_per_symbol],
+        b = config.tf_rng.uniform([100, 10*num_bits_per_symbol],
                                         minval=0, maxval=2, dtype=tf.dtypes.int32)
         x = m(b)
-        No = tf.random.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
+        No = config.tf_rng.uniform([1, 10], minval=0.01, maxval=100, dtype=np.float32)
         #
-        logits = d([x, No])
+        logits = d(x, No)
         points = m.constellation.points
         for l in range(0, x.shape[0]):
             for i, y in enumerate(x[l]):
@@ -982,33 +903,33 @@ class TestSymbolDemapper(unittest.TestCase):
 
         # simple precision
 
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex64)
-        mapper = Mapper(constellation=c, dtype=tf.complex64)
-        awgn = AWGN(dtype=tf.complex64)
-        demapper = SymbolDemapper(constellation=c, dtype=tf.complex64)
+        c = Constellation("qam", num_bits_per_symbol, precision="single")
+        mapper = Mapper(constellation=c, precision="single")
+        awgn = AWGN(precision="single")
+        demapper = SymbolDemapper(constellation=c, precision="single")
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
 
         # double precision
 
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex128)
-        mapper = Mapper(constellation=c, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = SymbolDemapper(constellation=c, dtype=tf.complex128)
+        c = Constellation("qam", num_bits_per_symbol, precision="double")
+        mapper = Mapper(constellation=c, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = SymbolDemapper(constellation=c, precision="double")
         @tf.function
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
 
@@ -1018,134 +939,112 @@ class TestSymbolDemapper(unittest.TestCase):
 
         # simple precision
 
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex64)
-        mapper = Mapper(constellation=c, dtype=tf.complex64)
-        awgn = AWGN(dtype=tf.complex64)
-        demapper = SymbolDemapper(constellation=c, dtype=tf.complex64)
+        c = Constellation("qam", num_bits_per_symbol, precision="single")
+        mapper = Mapper(constellation=c, precision="single")
+        awgn = AWGN(precision="single")
+        demapper = SymbolDemapper(constellation=c, precision="single")
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float32)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
 
         # double precision
 
-        c = Constellation("qam", num_bits_per_symbol, dtype=tf.complex128)
-        mapper = Mapper(constellation=c, dtype=tf.complex128)
-        awgn = AWGN(dtype=tf.complex128)
-        demapper = SymbolDemapper(constellation=c, dtype=tf.complex128)
+        c = Constellation("qam", num_bits_per_symbol, precision="double")
+        mapper = Mapper(constellation=c, precision="double")
+        awgn = AWGN(precision="double")
+        demapper = SymbolDemapper(constellation=c, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
             b = binary_source([batch_size, 3, 400])
             x = mapper(b)
-            no = tf.random.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
-            y = awgn([x, no])
-            return demapper([y, no])
+            no = config.tf_rng.uniform(tf.shape(x), minval=0.01, maxval=100, dtype=tf.float64)
+            y = awgn(x, no)
+            return demapper(y, no)
         self.assertEqual(run(100).shape, [100, 3, 100, 16])
         self.assertEqual(run(400).shape, [400, 3, 100, 16])
-
-    def test_model_mode(self):
-        num_bits_per_symbol = 4
-        num_points = 2**num_bits_per_symbol
-        binary_source = BinarySource()
-        constellation = Constellation("qam", num_bits_per_symbol)
-        mapper = Mapper(constellation=constellation)
-        awgn = AWGN()
-        demapper = SymbolDemapper(constellation=constellation)
-        b = tf.keras.Input(shape=(3, 400), dtype=tf.float32)
-        no = tf.keras.Input(shape=(3, 100), dtype=tf.float32)
-        x = mapper(b)
-        y = awgn([x, no])
-        llr = demapper([y, no])
-        model = tf.keras.Model(inputs=[b, no], outputs=llr)
-        model.compile()
-        in1 = binary_source([100, 3, 400])
-        in2 = tf.random.uniform([100, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2]).shape, [100, 3, 100, num_points])
-        in1 = binary_source([400, 3, 400])
-        in2 = tf.random.uniform([400, 3, 100], minval=0.01, maxval=100, dtype=np.float32)
-        self.assertEqual(model([in1, in2]).shape, [400, 3, 100, num_points])
 
 class TestSymbolLogits2LLRsWithPrior(unittest.TestCase):
     def test_assert_demapping_method(self):
         with self.assertRaises(AssertionError):
-            SymbolLogits2LLRsWithPrior("asdfiu", 6)
+            SymbolLogits2LLRs("asdfiu", 6)
 
     def test_assert_non_broadcastable_dimensions(self):
-        d = SymbolLogits2LLRsWithPrior("app", 4)
-        l = tf.random.uniform([16, 50, 200, 16], minval=-20., maxval=20., dtype=tf.dtypes.float32)
+        d = SymbolLogits2LLRs("app", 4, with_prior=True)
+        l = config.tf_rng.uniform([16, 50, 200, 16], minval=-20., maxval=20., dtype=tf.dtypes.float32)
         # prior
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([16, 50, 4])
-            llr = d([l, p])
+            p = config.tf_rng.uniform([16, 50, 4])
+            llr = d(l, p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([16, 50, 200])
-            llr = d([l, p])
+            p = config.tf_rng.uniform([16, 50, 200])
+            llr = d(l, p)
         with self.assertRaises(tf.errors.InvalidArgumentError):
-            p = tf.random.uniform([16, 1])
-            llr = d([l, p])
+            p = config.tf_rng.uniform([16, 1])
+            llr = d(l, p)
 
     def test_output_dimensions1(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            d = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol)
+            d = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True)
             batch_size = 99
             dim1 = 10
             dim2 = 12
-            l = tf.random.uniform([batch_size, dim1, dim2, 2**num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, dim1, dim2, 2**num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
-            p = tf.random.uniform([num_bits_per_symbol])
-            llr = d([l, p])
+            p = config.tf_rng.uniform([num_bits_per_symbol])
+            llr = d(l, p)
             self.assertEqual(llr.shape, [batch_size, dim1, dim2, num_bits_per_symbol])
 
     def test_output_dimensions2(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            d = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol)
+            d = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True)
             batch_size = 99
-            l = tf.random.uniform([batch_size, 2**num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, 2**num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
-            p = tf.random.uniform([num_bits_per_symbol])
-            llr = d([l, p])
+            p = config.tf_rng.uniform([num_bits_per_symbol])
+            llr = d(l, p)
             self.assertEqual(llr.shape, [batch_size, num_bits_per_symbol])
 
     def test_prior_inputs(self):
         for num_bits_per_symbol in [1, 2, 4, 6]:
-            d = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol)
-            l = tf.random.uniform([100, 10, 50, 2**num_bits_per_symbol],
+            d = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True)
+            l = config.tf_rng.uniform([100, 10, 50, 2**num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
-            p = tf.random.uniform([100, 10, 50, num_bits_per_symbol])
-            llr = d([l, p])
+            p = config.tf_rng.uniform([100, 10, 50, num_bits_per_symbol])
+            llr = d(l, p)
             self.assertEqual(llr.shape, [100, 10, 50, num_bits_per_symbol])
 
             with self.assertRaises(tf.errors.InvalidArgumentError):
-                p = tf.random.uniform([100, 10, 49, num_bits_per_symbol])
-                llr = d([l, p])
+                p = config.tf_rng.uniform([100, 10, 49, num_bits_per_symbol])
+                llr = d(l, p)
 
     def test_llr_calc(self):
         "Test LLRs computation APP/MAXLOG"
         num_bits_per_symbol = 6
         num_points = 2**num_bits_per_symbol
-        d_app = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol)
-        d_maxlog = SymbolLogits2LLRsWithPrior("maxlog", num_bits_per_symbol)
-        logits = tf.random.uniform([100, 10, num_points],
+        d_app = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True)
+        d_maxlog = SymbolLogits2LLRs("maxlog", num_bits_per_symbol, with_prior=True)
+        logits = config.tf_rng.uniform([100, 10, num_points],
                                         minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
         # Precompute priors and probabilities on symbols
-        prior = tf.random.normal(tf.concat([logits.shape[:-1], [num_bits_per_symbol]], axis=0))
+        prior = config.tf_rng.normal(tf.concat([logits.shape[:-1], [num_bits_per_symbol]], axis=0))
         a = np.zeros([num_points, num_bits_per_symbol])
         for i in range(0, num_points):
             a[i,:] = np.array(list(np.binary_repr(i, num_bits_per_symbol)),
-                              dtype=np.int16)
+                              dtype=np.int32)
         a = 2*a-1
         a = np.expand_dims(a, axis=(0, 1))
         ps_exp = a*np.expand_dims(prior, axis=-2)
         ps_exp = ps_exp - np.log(1+np.exp(ps_exp)) # log(sigmoid(ps_exp))
         ps_exp = np.sum(ps_exp, axis=-1) # [batch size, block length, num points]
         #
-        llr_app = d_app([logits, prior])
-        llr_maxlog = d_maxlog([logits, prior])
+        llr_app = d_app(logits, prior)
+        llr_maxlog = d_maxlog(logits, prior)
         for b in range(0, logits.shape[0]):
             for i in range(0, logits.shape[1]):
                 ps_exp_ = ps_exp[b,i]
@@ -1165,23 +1064,23 @@ class TestSymbolLogits2LLRsWithPrior(unittest.TestCase):
 
         # simple precision
 
-        l2l = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol, dtype=tf.float32)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True)
         @tf.function
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
-            prior = tf.random.normal([num_bits_per_symbol])
-            return l2l([logits, prior])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
+            prior = config.tf_rng.normal([num_bits_per_symbol])
+            return l2l(logits, prior)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
 
         # double precision
 
-        l2l = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol, dtype=tf.float64)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True, precision="double")
         @tf.function
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
-            prior = tf.random.normal([num_bits_per_symbol])
-            return l2l([logits, prior])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
+            prior = config.tf_rng.normal([num_bits_per_symbol])
+            return l2l(logits, prior)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
 
@@ -1190,39 +1089,25 @@ class TestSymbolLogits2LLRsWithPrior(unittest.TestCase):
 
         # simple precision
 
-        l2l = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol, dtype=tf.float32)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True)
         @tf.function(jit_compile=True)
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
-            prior = tf.random.normal([num_bits_per_symbol])
-            return l2l([logits, prior])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
+            prior = config.tf_rng.normal([num_bits_per_symbol])
+            return l2l(logits, prior)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
 
         # double precision
 
-        l2l = SymbolLogits2LLRsWithPrior("app", num_bits_per_symbol, dtype=tf.float64)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, with_prior=True, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
-            prior = tf.random.normal([num_bits_per_symbol])
-            return l2l([logits, prior])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
+            prior = config.tf_rng.normal([num_bits_per_symbol])
+            return l2l(logits, prior)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
-
-    def test_model_mode(self):
-        l2l = SymbolLogits2LLRsWithPrior("app", 4)
-        logits = tf.keras.Input(shape=(150, 16), dtype=tf.float32)
-        prior = tf.keras.Input(shape=(4), dtype=tf.float32)
-        llr = l2l([logits, prior])
-        model = tf.keras.Model(inputs=[logits, prior], outputs=llr)
-        model.compile()
-        in1 = tf.random.normal([100, 150, 16])
-        in2 = tf.random.normal([4])
-        self.assertEqual(model([in1, in2]).shape, [100, 150, 4])
-        in1 = tf.random.normal([256, 150, 16])
-        in2 = tf.random.normal([4])
-        self.assertEqual(model([in1, in2]).shape, [256, 150, 4])
 
 class TestSymbolLogits2LLRs(unittest.TestCase):
     def test_assert_demapping_method(self):
@@ -1235,7 +1120,7 @@ class TestSymbolLogits2LLRs(unittest.TestCase):
             batch_size = 99
             dim1 = 10
             dim2 = 12
-            l = tf.random.uniform([batch_size, dim1, dim2, 2**num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, dim1, dim2, 2**num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
             llr = d(l)
             self.assertEqual(llr.shape, [batch_size, dim1, dim2, num_bits_per_symbol])
@@ -1244,7 +1129,7 @@ class TestSymbolLogits2LLRs(unittest.TestCase):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             d = SymbolLogits2LLRs("app", num_bits_per_symbol)
             batch_size = 99
-            l = tf.random.uniform([batch_size, 2**num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, 2**num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
             llr = d(l)
             self.assertEqual(llr.shape, [batch_size, num_bits_per_symbol])
@@ -1255,7 +1140,7 @@ class TestSymbolLogits2LLRs(unittest.TestCase):
         num_points = 2**num_bits_per_symbol
         d_app = SymbolLogits2LLRs("app", num_bits_per_symbol)
         d_maxlog = SymbolLogits2LLRs("maxlog", num_bits_per_symbol)
-        logits = tf.random.uniform([100, 10, num_points],
+        logits = config.tf_rng.uniform([100, 10, num_points],
                                         minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
         llr_app = d_app(logits)
         llr_maxlog = d_maxlog(logits)
@@ -1274,20 +1159,20 @@ class TestSymbolLogits2LLRs(unittest.TestCase):
 
         # simple precision
 
-        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, dtype=tf.float32)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, precision="single")
         @tf.function
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
             return l2l(logits)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
 
         # double precision
 
-        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, dtype=tf.float64)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, precision="double")
         @tf.function
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
             return l2l(logits)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
@@ -1297,34 +1182,23 @@ class TestSymbolLogits2LLRs(unittest.TestCase):
 
         # simple precision
 
-        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, dtype=tf.float32)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, precision="single")
         @tf.function(jit_compile=True)
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
             return l2l(logits)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
 
         # double precision
 
-        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, dtype=tf.float64)
+        l2l = SymbolLogits2LLRs("app", num_bits_per_symbol, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
             return l2l(logits)
         self.assertEqual(run(100).shape, [100, 150, num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, num_bits_per_symbol])
-
-    def test_model_mode(self):
-        l2l = SymbolLogits2LLRs("app", 4)
-        logits = tf.keras.Input(shape=(150, 16), dtype=tf.float32)
-        llr = l2l(logits)
-        model = tf.keras.Model(inputs=[logits], outputs=llr)
-        model.compile()
-        in1 = tf.random.normal([100, 150, 16])
-        self.assertEqual(model([in1]).shape, [100, 150, 4])
-        in1 = tf.random.normal([256, 150, 16])
-        self.assertEqual(model([in1]).shape, [256, 150, 4])
 
 class TestLLRs2SymbolLogits(unittest.TestCase):
 
@@ -1334,7 +1208,7 @@ class TestLLRs2SymbolLogits(unittest.TestCase):
             batch_size = 99
             dim1 = 10
             dim2 = 12
-            l = tf.random.uniform([batch_size, dim1, dim2, num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, dim1, dim2, num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
             llr = d(l)
             self.assertEqual(llr.shape, [batch_size, dim1, dim2, 2**num_bits_per_symbol])
@@ -1343,7 +1217,7 @@ class TestLLRs2SymbolLogits(unittest.TestCase):
         for num_bits_per_symbol in [1, 2, 4, 6]:
             d = LLRs2SymbolLogits(num_bits_per_symbol)
             batch_size = 99
-            l = tf.random.uniform([batch_size, num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
             llr = d(l)
             self.assertEqual(llr.shape, [batch_size, 2**num_bits_per_symbol])
@@ -1357,7 +1231,7 @@ class TestLLRs2SymbolLogits(unittest.TestCase):
         num_bits_per_symbol = 6
         num_points = 2**num_bits_per_symbol
         d = LLRs2SymbolLogits(num_bits_per_symbol)
-        llrs = tf.random.uniform([100, 10, num_bits_per_symbol],
+        llrs = config.tf_rng.uniform([100, 10, num_bits_per_symbol],
                                         minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
         logits = d(llrs)
         for b in range(0, llrs.shape[0]):
@@ -1370,20 +1244,20 @@ class TestLLRs2SymbolLogits(unittest.TestCase):
 
         # simple precision
 
-        l2l = LLRs2SymbolLogits(num_bits_per_symbol, dtype=tf.float32)
+        l2l = LLRs2SymbolLogits(num_bits_per_symbol, precision="single")
         @tf.function
         def run(batch_size):
-            llrs = tf.random.normal([batch_size, 150, num_bits_per_symbol])
+            llrs = config.tf_rng.normal([batch_size, 150, num_bits_per_symbol])
             return l2l(llrs)
         self.assertEqual(run(100).shape, [100, 150, 2**num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, 2**num_bits_per_symbol])
 
         # double precision
 
-        l2l = LLRs2SymbolLogits(num_bits_per_symbol, dtype=tf.float64)
+        l2l = LLRs2SymbolLogits(num_bits_per_symbol, precision="double")
         @tf.function
         def run(batch_size):
-            llrs = tf.random.normal([batch_size, 150, num_bits_per_symbol])
+            llrs = config.tf_rng.normal([batch_size, 150, num_bits_per_symbol])
             return l2l(llrs)
         self.assertEqual(run(100).shape, [100, 150, 2**num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, 2**num_bits_per_symbol])
@@ -1393,34 +1267,23 @@ class TestLLRs2SymbolLogits(unittest.TestCase):
 
         # simple precision
 
-        l2l = LLRs2SymbolLogits(num_bits_per_symbol, dtype=tf.float32)
+        l2l = LLRs2SymbolLogits(num_bits_per_symbol, precision="single")
         @tf.function(jit_compile=True)
         def run(batch_size):
-            llrs = tf.random.normal([batch_size, 150, num_bits_per_symbol])
+            llrs = config.tf_rng.normal([batch_size, 150, num_bits_per_symbol])
             return l2l(llrs)
         self.assertEqual(run(100).shape, [100, 150, 2**num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, 2**num_bits_per_symbol])
 
         # double precision
 
-        l2l = LLRs2SymbolLogits(num_bits_per_symbol, dtype=tf.float64)
+        l2l = LLRs2SymbolLogits(num_bits_per_symbol, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
-            llrs = tf.random.normal([batch_size, 150, num_bits_per_symbol])
+            llrs = config.tf_rng.normal([batch_size, 150, num_bits_per_symbol])
             return l2l(llrs)
         self.assertEqual(run(100).shape, [100, 150, 2**num_bits_per_symbol])
         self.assertEqual(run(400).shape, [400, 150, 2**num_bits_per_symbol])
-
-    def test_model_mode(self):
-        l2l = LLRs2SymbolLogits(4)
-        llrs = tf.keras.Input(shape=(150, 4), dtype=tf.float32)
-        logits = l2l(llrs)
-        model = tf.keras.Model(inputs=[llrs], outputs=logits)
-        model.compile()
-        in1 = tf.random.normal([100, 150, 4])
-        self.assertEqual(model([in1]).shape, [100, 150, 16])
-        in1 = tf.random.normal([256, 150, 4])
-        self.assertEqual(model([in1]).shape, [256, 150, 16])
 
 class TestSymbolLogits2Moments(unittest.TestCase):
     def test_output_dimensions1(self):
@@ -1429,7 +1292,7 @@ class TestSymbolLogits2Moments(unittest.TestCase):
             batch_size = 99
             dim1 = 10
             dim2 = 12
-            l = tf.random.uniform([batch_size, dim1, dim2, 2**num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, dim1, dim2, 2**num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
             m, v = d(l)
             self.assertEqual(m.shape, [batch_size, dim1, dim2])
@@ -1439,7 +1302,7 @@ class TestSymbolLogits2Moments(unittest.TestCase):
         for num_bits_per_symbol in [2, 4, 6]:
             d = SymbolLogits2Moments("qam", num_bits_per_symbol)
             batch_size = 99
-            l = tf.random.uniform([batch_size, 2**num_bits_per_symbol],
+            l = config.tf_rng.uniform([batch_size, 2**num_bits_per_symbol],
                                 minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
             m,v = d(l)
             self.assertEqual(m.shape, [batch_size])
@@ -1453,7 +1316,7 @@ class TestSymbolLogits2Moments(unittest.TestCase):
         points = c.points
 
         d = SymbolLogits2Moments(constellation=c)
-        logits = tf.random.uniform([100, num_points],
+        logits = config.tf_rng.uniform([100, num_points],
                                         minval=-20.0, maxval=20.0, dtype=tf.dtypes.float32)
         m,v = d(logits)
 
@@ -1470,10 +1333,10 @@ class TestSymbolLogits2Moments(unittest.TestCase):
 
         # simple precision
 
-        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, dtype=tf.float32)
+        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, precision="single")
         @tf.function
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
             return l2m(logits)
 
         m,v = run(100)
@@ -1486,10 +1349,10 @@ class TestSymbolLogits2Moments(unittest.TestCase):
 
         # double precision
 
-        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, dtype=tf.float64)
+        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, precision="double")
         @tf.function
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol], dtype=tf.float64)
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol], dtype=tf.float64)
             return l2m(logits)
 
         m,v = run(100)
@@ -1505,10 +1368,10 @@ class TestSymbolLogits2Moments(unittest.TestCase):
 
         # simple precision
 
-        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, dtype=tf.float32)
+        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, precision="single")
         @tf.function(jit_compile=True)
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol])
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol])
             return l2m(logits)
 
         m,v = run(100)
@@ -1521,10 +1384,10 @@ class TestSymbolLogits2Moments(unittest.TestCase):
 
         # double precision
 
-        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, dtype=tf.float64)
+        l2m = SymbolLogits2Moments("qam", num_bits_per_symbol, precision="double")
         @tf.function(jit_compile=True)
         def run(batch_size):
-            logits = tf.random.normal([batch_size, 150, 2**num_bits_per_symbol], dtype=tf.float64)
+            logits = config.tf_rng.normal([batch_size, 150, 2**num_bits_per_symbol], dtype=tf.float64)
             return l2m(logits)
 
         m,v = run(100)
@@ -1534,20 +1397,3 @@ class TestSymbolLogits2Moments(unittest.TestCase):
         m,v = run(400)
         self.assertEqual(m.shape, [400, 150])
         self.assertEqual(v.shape, [400, 150])
-
-    # def test_model_mode(self):
-    #     l2m = SymbolLogits2Moments("qam", 4)
-    #     logits = tf.keras.Input(shape=(150, 16), dtype=tf.float32)
-    #     m,v = l2m(logits)
-    #     model = tf.keras.Model(inputs=[logits], outputs=(m,v))
-    #     model.compile()
-
-    #     in1 = tf.random.normal([100, 150, 16])
-    #     m,v = model([in1])
-    #     self.assertEqual(m.shape, [100, 150])
-    #     self.assertEqual(v.shape, [100, 150])
-
-    #     in1 = tf.random.normal([256, 150, 16])
-    #     m,v = model([in1])
-    #     self.assertEqual(m.shape, [256, 150])
-    #     self.assertEqual(v.shape, [256, 150])

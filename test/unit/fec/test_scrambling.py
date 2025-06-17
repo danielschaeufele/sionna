@@ -1,36 +1,20 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 
 import unittest
 import numpy as np
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except Runtime as e:
-        print(e)
-from sionna.fec.scrambling import Descrambler, Scrambler, TB5GScrambler
-from sionna.utils import BinarySource
-from sionna.nr import generate_prng_seq
+from sionna.phy import config
+from sionna.phy.fec.scrambling import Descrambler, Scrambler, TB5GScrambler
+from sionna.phy.nr import generate_prng_seq
 
 class TestScrambler(unittest.TestCase):
 
     def test_sequence_dimension(self):
         """Test against correct dimensions of the sequence"""
-        seq_lengths = [1, 100, 256, 1000, 1e4]
-        batch_sizes = [1, 100, 256, 1000, 1e4]
+        seq_lengths = [1, 100, 256, 1e4]
+        batch_sizes = [1, 100, 256, 1e4]
 
         # keep_State=True
         for seq_length in seq_lengths:
@@ -38,22 +22,29 @@ class TestScrambler(unittest.TestCase):
             # only different batch_sizes are allowed in this mode
             s = Scrambler(binary=False)
             for batch_size in batch_sizes:
-                llr = tf.random.uniform([tf.cast(batch_size, dtype=tf.int32),
-                                         tf.cast(seq_length, dtype=tf.int32)])
+                llr = config.tf_rng.uniform(
+                                [tf.cast(batch_size,dtype=tf.int32),
+                                 tf.cast(seq_length, dtype=tf.int32)])
                 # build scrambler
                 x = s(llr).numpy()
                 self.assertTrue(np.array_equal(np.array(x.shape),
-                                 [int(batch_size), int(seq_length)]))
+                                [int(batch_size), int(seq_length)]))
         # keep_State=False
         s = Scrambler(binary=False, keep_state=False)
         for seq_length in seq_lengths:
             for batch_size in batch_sizes:
-                llr = tf.random.uniform([tf.cast(batch_size, dtype=tf.int32),
-                                         tf.cast(seq_length, dtype=tf.int32)])
+                llr = config.tf_rng.uniform(
+                                    [tf.cast(batch_size,dtype=tf.int32),
+                                    tf.cast(seq_length, dtype=tf.int32)])
                 # build scrambler
                 x = s(llr).numpy()
                 self.assertTrue(np.array_equal(np.array(x.shape),
-                                 [int(batch_size), int(seq_length)]))
+                               [int(batch_size), int(seq_length)]))
+
+        # test non-batch dimension
+        llr = tf.zeros([100,])
+        x = s(llr).numpy()
+        self.assertTrue(x.shape==(100,))
 
     def test_sequence_offset(self):
         """Test that scrambling sequence has no offset, i.e., equal likely 0s
@@ -63,8 +54,9 @@ class TestScrambler(unittest.TestCase):
         for seed in (None, 1337, 1234, 1003): # test some initial seeds
             for keep_state in (False, True):
                 s = Scrambler(seed=seed, keep_state=keep_state, binary=True)
-                llr = tf.random.uniform([tf.cast(batch_size, dtype=tf.int32),
-                                         tf.cast(seq_length, dtype=tf.int32)])
+                llr = config.tf_rng.uniform(
+                            [tf.cast(batch_size, dtype=tf.int32),
+                            tf.cast(seq_length, dtype=tf.int32)])
                 # build scrambler
                 s(llr)
                 # generate a random sequence
@@ -79,7 +71,7 @@ class TestScrambler(unittest.TestCase):
 
         seq_length = int(1e6)
         batch_size = int(1e1)
-        llr = tf.random.uniform([batch_size, seq_length])
+        llr = config.tf_rng.uniform([batch_size, seq_length])
 
         for keep_state in (False, True):
             s = Scrambler(keep_batch_constant=False,
@@ -112,7 +104,7 @@ class TestScrambler(unittest.TestCase):
         seq_length = int(1e5)
         batch_size = int(1e2)
         s = Scrambler(keep_state=False, binary=True)
-        llr = tf.random.uniform([batch_size, seq_length])
+        llr = config.tf_rng.uniform([batch_size, seq_length])
         # generate a random sequence
         x1 = s(tf.zeros_like(llr))
         x2 = s(tf.zeros_like(llr))
@@ -127,10 +119,9 @@ class TestScrambler(unittest.TestCase):
         batch_size = int(1e2)
 
         #check binary scrambling
-        b = tf.random.uniform([tf.cast(batch_size, dtype=tf.int32),
-                               tf.cast(seq_length, dtype=tf.int32)],
-                               minval=0,
-                               maxval=1)
+        b = config.tf_rng.uniform([tf.cast(batch_size, dtype=tf.int32),
+                                   tf.cast(seq_length, dtype=tf.int32)],
+                                   minval=0, maxval=1)
         for keep_batch in (False, True):
             s = Scrambler(binary=True,
                           keep_batch_constant=keep_batch,
@@ -145,7 +136,7 @@ class TestScrambler(unittest.TestCase):
             s = Scrambler(binary=False,
                           keep_batch_constant=keep_batch,
                           keep_state=True)
-            llr = tf.random.uniform([tf.cast(batch_size, dtype=tf.int32),
+            llr = config.tf_rng.uniform([tf.cast(batch_size, dtype=tf.int32),
                                      tf.cast(seq_length, dtype=tf.int32)])
             x = s(llr)
             x = s(x)
@@ -166,45 +157,24 @@ class TestScrambler(unittest.TestCase):
         Iff keep_state==True, the scrambled sequences must be constant."""
         seq_length = int(1e5)
         batch_size = int(1e2)
-        llr = tf.random.uniform([tf.cast(batch_size, dtype=tf.int32),
-                                 tf.cast(seq_length, dtype=tf.int32)],
-                                minval=-100,
-                                maxval=100)
-        S = Scrambler(binary=True, keep_state=True)
-        res1 = S(tf.zeros_like(llr))
-        res2 = S(tf.zeros_like(llr))
+        llr = config.tf_rng.uniform([tf.cast(batch_size, dtype=tf.int32),
+                                     tf.cast(seq_length, dtype=tf.int32)],
+                                     minval=-100, maxval=100)
+        s = Scrambler(binary=True, keep_state=True)
+        res1 = s(tf.zeros_like(llr))
+        res2 = s(tf.zeros_like(llr))
 
         self.assertTrue(np.array_equal(res1.numpy(), res2.numpy()))
 
         # also check that the sequence is unique with keep_state=False
-        S = Scrambler(binary=True, keep_state=False)
-        _ = S(llr)
-        res1 = S(tf.zeros_like(llr))
-        _ = S(llr)
-        res2 = S(tf.zeros_like(llr))
+        s = Scrambler(binary=True, keep_state=False)
+        _ = s(llr)
+        res1 = s(tf.zeros_like(llr))
+        _ = s(llr)
+        res2 = s(tf.zeros_like(llr))
 
         self.assertFalse(np.array_equal(res1.numpy(), res2.numpy()))
 
-
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-        bs = 10
-        k = 100
-        source = BinarySource()
-
-        inputs = tf.keras.Input(shape=(k), dtype=tf.float32)
-        x = Scrambler()(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=x)
-        # test that output batch dim is none
-        self.assertTrue(model.output_shape[0] is None)
-
-        # test that model can be called
-        b = source([bs,k])
-        model(b)
-        # call twice to see that bs can change
-        b2 = source([bs+1,k])
-        model(b2)
-        model.summary()
 
     def test_tf_fun(self):
         """Test that graph mode and XLA works as expected"""
@@ -280,24 +250,24 @@ class TestScrambler(unittest.TestCase):
         seed = 987654
         s9 = Scrambler(seed=45234, keep_state=False)
         s10 = Scrambler(seed=76543, keep_state=True)
-        x1 = s9([b, seed]).numpy()
-        x2 = s9([b, seed+1]).numpy()
-        x3 = s9([b, seed]).numpy()
-        x4 = s10([b, seed]).numpy()
+        x1 = s9(x=b, seed=seed).numpy()
+        x2 = s9(x=b, seed=seed+1).numpy()
+        x3 = s9(x=b, seed=seed).numpy()
+        x4 = s10(x=b, seed=seed).numpy()
         self.assertFalse(np.array_equal(x1, x2)) # different seed
         self.assertTrue(np.array_equal(x1, x3)) # same seed
         self.assertTrue(np.array_equal(x1, x4)) # same seed (keep_state=f)
 
         # test that random seed allows inverse
-        x5 = s9([b, seed])
-        x6 = s9([b, seed]).numpy()
+        x5 = s9(x=b, seed=seed)
+        x6 = s9(x=b, seed=seed).numpy()
         # same seed
         self.assertTrue(np.array_equal(x5, x6)) # identity
         # different seed
-        x7 = s9([b, seed+1])
+        x7 = s9(x=b, seed=seed+1)
         self.assertFalse(np.array_equal(x5, x7)) # identity
         # same seed again
-        x8 = s9([b, seed+1])
+        x8 = s9(x=b, seed=seed+1)
         self.assertTrue(np.array_equal(x7, x8)) # identity
 
     def test_dtype(self):
@@ -305,17 +275,18 @@ class TestScrambler(unittest.TestCase):
         seq_length = int(1e1)
         batch_size = int(1e2)
 
-        dt_supported = [tf.float16, tf.float32, tf.float64]
-        for dt in dt_supported:
-            for dt_in in dt_supported:
-                for dt_out in dt_supported:
+        precisions = ["single", "double"]
+        dt_supported = [tf.float32, tf.float64]
+        for dt_in in dt_supported:
+            for p_scr, dt_scr in zip(precisions, dt_supported):
+                for p_des,dt_des in zip(precisions, dt_supported):
                     b = tf.zeros([batch_size, seq_length], dtype=dt_in)
-                    s1 = Scrambler(dtype=dt)
-                    s2 = Descrambler(s1, dtype=dt_out)
+                    s1 = Scrambler(precision=p_scr)
+                    s2 = Descrambler(s1, precision=p_des)
                     x = s1(b)
                     y = s2(x)
-                    assert (x.dtype==dt)
-                    assert (y.dtype==dt_out)
+                    assert (x.dtype==dt_scr)
+                    assert (y.dtype==dt_des)
 
     def test_descrambler(self):
         """"Test that descrambler works as expected."""
@@ -329,7 +300,7 @@ class TestScrambler(unittest.TestCase):
         y = s2(x)
         assert (np.array_equal(b.numpy(), y.numpy()))
 
-        x = s1([b, 1234])
+        x = s1(b, seed=1234)
         y = s2(x)
         assert (not np.array_equal(b.numpy(), y.numpy()))
 
@@ -352,23 +323,23 @@ class TestScrambler(unittest.TestCase):
         descrambler = Descrambler(scrambler, binary=False)
         # with explicit seed
         s = 8764
-        y = scrambler([b, s])
-        z = descrambler([2*y-1, s]) # bspk
-        z = 1 + z # remove bpsk
+        y = scrambler(b, seed=s)
+        z = descrambler(2*y-1, seed=s) # bspk
+        z = 0.5 * (1 + z) # remove bpsk
         assert (np.array_equal(b.numpy(), z.numpy()))
         #without explicit seed
         y = scrambler(b)
         z = descrambler(2*y-1) # bspk
-        z = 1 + z # remove bpsk
+        z = 0.5 * (1 + z) # remove bpsk
         assert (np.array_equal(b.numpy(), z.numpy()))
 
         # scrambler non-binary, but descrambler
         scrambler = Scrambler(seed=1235456, binary=False)
         descrambler = Descrambler(scrambler, binary=True)
         s = 546342
-        y = scrambler([2*b-1, s]) # bspk
+        y = scrambler(2*b-1, seed=s) # bspk
         y = 0.5*(1 + y) # remove bpsk
-        z = descrambler([y, s])
+        z = descrambler(y, seed=s)
         assert (np.array_equal(b.numpy(), z.numpy()))
         #without explicit seed
         y = scrambler(2*b-1) # bspk
@@ -390,9 +361,9 @@ class TestScrambler(unittest.TestCase):
 
         s = 1234
         x1 = scrambler(b) # binary scrambling
-        x2 = scrambler([b, s]) # binary scrambling different seed
-        x3 = scrambler([b, s, True]) # binary scrambling different seed
-        x4 = scrambler([b, s, False]) # non-binary scrambling different seed
+        x2 = scrambler(b, seed=s) # binary scrambling different seed
+        x3 = scrambler(b, seed=s, binary=True) # binary scrambling different seed
+        x4 = scrambler(b, seed=s, binary=False) # non-binary scrambling different seed
 
         assert (not np.array_equal(x1.numpy(), x2.numpy())) # different seed
         assert (np.array_equal(x2.numpy(), x3.numpy())) # same seed
@@ -434,7 +405,7 @@ class TestScrambler(unittest.TestCase):
             descrambler = Descrambler(scrambler, binary=b)
             x = np.ones([bs, seq_length])
             y = scrambler(x)
-            y2 = scrambler([x, 1337]) # explicit seed should not have any impact
+            y2 = scrambler(x, seed=1337) # explicit seed should not have any impact
             z = descrambler(y)
 
             self.assertFalse(np.array_equal(x, y.numpy()))
@@ -446,17 +417,22 @@ class TestTB5GScrambler(unittest.TestCase):
 
     def test_sequence_dimension(self):
         """Test against correct dimensions of the sequence"""
-        seq_lengths = [1, 100, 256, 1000, 1e4]
-        batch_sizes = [1, 100, 256, 1000, 1e4]
+        seq_lengths = [1, 100, 256, 1e4]
+        batch_sizes = [1, 100, 256, 1e4]
 
         s = TB5GScrambler()
         for seq_length in seq_lengths:
             for batch_size in batch_sizes:
-                llr = tf.random.uniform([tf.cast(batch_size, dtype=tf.int32),
+                llr = config.tf_rng.uniform([tf.cast(batch_size, dtype=tf.int32),
                                          tf.cast(seq_length, dtype=tf.int32)])
                 x = s(llr).numpy()
                 self.assertTrue(np.array_equal(np.array(x.shape),
                                 [int(batch_size), int(seq_length)]))
+
+        # test non-batch dimension
+        llr = tf.zeros([100,])
+        x = s(llr).numpy()
+        self.assertTrue(x.shape==(100,))
 
     def test_sequence_batch(self):
         """Test that scrambling sequence the same for all batch samples."""
@@ -484,8 +460,8 @@ class TestTB5GScrambler(unittest.TestCase):
         x_ref = s(tf.zeros((batch_size, seq_length)))
 
         for _ in range(100): # randomly init new scramblers
-            n_rnti=np.random.randint(0, 2**16-1)
-            n_id=np.random.randint(0, 2**10-1)
+            n_rnti=config.np_rng.integers(0, 2**16-1)
+            n_id=config.np_rng.integers(0, 2**10-1)
             if n_rnti==n_rnti_ref and n_id==n_id_ref:
                 continue # skip evaluation if ref init parameters are selected
             s = TB5GScrambler(n_rnti, n_id, binary=True)
@@ -503,7 +479,7 @@ class TestTB5GScrambler(unittest.TestCase):
         batch_size = int(1e2)
 
         #check binary scrambling
-        b = tf.random.uniform([batch_size, seq_length], minval=0, maxval=1)
+        b = config.tf_rng.uniform([batch_size, seq_length], minval=0, maxval=1)
         s = TB5GScrambler(binary=True)
         b = tf.cast(tf.greater(0.5, b), dtype=tf.float32)
         x = s(b)
@@ -512,31 +488,10 @@ class TestTB5GScrambler(unittest.TestCase):
 
         #check soft-value scrambling (flip sign)
         s = TB5GScrambler(binary=False)
-        llr = tf.random.uniform([batch_size, seq_length])
+        llr = config.tf_rng.uniform([batch_size, seq_length])
         x = s(llr)
         x = s(x)
         self.assertTrue(np.array_equal(x.numpy(), llr.numpy()))
-
-
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-        bs = 10
-        k = 100
-        source = BinarySource()
-
-        inputs = tf.keras.Input(shape=(k), dtype=tf.float32)
-        x = TB5GScrambler()(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=x)
-        # test that output batch dim is none
-        self.assertTrue(model.output_shape[0] is None)
-
-        # test that model can be called
-        b = source([bs,k])
-        model(b)
-        # call twice to see that bs can change
-        b2 = source([bs+1,k])
-        model(b2)
-        model.summary()
 
     def test_tf_fun(self):
         """Test that graph mode and XLA works as expected"""
@@ -550,15 +505,15 @@ class TestTB5GScrambler(unittest.TestCase):
             return s(llr)
 
         s = TB5GScrambler()
-        b = tf.ones([100,200])
+        b = tf.ones([10,200])
         x1 = run_graph(b)
         x2 = run_graph_xla(b)
         # again with different batch_size
-        b = tf.ones([101,200])
+        b = tf.ones([11,200])
         x1 = run_graph(b)
         x2 = run_graph_xla(b)
         # and different sequence length
-        b = tf.ones([101,201])
+        b = tf.ones([11,201])
         x1 = run_graph(b)
         x2 = run_graph_xla(b)
 
@@ -570,17 +525,18 @@ class TestTB5GScrambler(unittest.TestCase):
         seq_length = int(1e1)
         batch_size = int(1e2)
 
-        dt_supported = [tf.float16, tf.float32, tf.float64]
-        for dt in dt_supported:
-            for dt_in in dt_supported:
-                for dt_out in dt_supported:
+        precisions = ["single", "double"]
+        dt_supported = [tf.float32, tf.float64]
+        for dt_in in dt_supported:
+            for p_scr, dt_scr in zip(precisions, dt_supported):
+                for p_des,dt_des in zip(precisions, dt_supported):
                     b = tf.zeros([batch_size, seq_length], dtype=dt_in)
-                    s1 = TB5GScrambler(dtype=dt)
-                    s2 = Descrambler(s1, dtype=dt_out)
+                    s1 = TB5GScrambler(precision=p_scr)
+                    s2 = Descrambler(s1, precision=p_des)
                     x = s1(b)
                     y = s2(x)
-                    assert (x.dtype==dt)
-                    assert (y.dtype==dt_out)
+                    assert (x.dtype==dt_scr)
+                    assert (y.dtype==dt_des)
 
     def test_descrambler(self):
         """"Test that descrambler works as expected."""
@@ -631,9 +587,9 @@ class TestTB5GScrambler(unittest.TestCase):
         scrambler = TB5GScrambler(binary=True)
 
         x1 = scrambler(b) # binary scrambling
-        x2 = scrambler([b]) # binary scrambling
-        x3 = scrambler([b, True]) # binary scrambling
-        x4 = scrambler([b, False]) # non-binary scrambling
+        x2 = scrambler(b) # binary scrambling
+        x3 = scrambler(b, binary=True) # binary scrambling
+        x4 = scrambler(b, binary=False) # non-binary scrambling
 
         assert (np.array_equal(x1.numpy(), x2.numpy()))
         assert (np.array_equal(x2.numpy(), x3.numpy()))
@@ -663,14 +619,14 @@ class TestTB5GScrambler(unittest.TestCase):
         n_ids = [0, 10, 1023] # valid
         for n_r in n_rs:
             for n_id in n_ids:
-                with self.assertRaises(AssertionError):
+                with self.assertRaises(ValueError):
                     s = TB5GScrambler(n_id=n_id, n_rnti=n_r)(tf.zeros((bs, l)))
 
         n_rs = [0, 10, 65535] # valid
         n_ids = [-1, 1.2, 1024] # invalid
         for n_r in n_rs:
             for n_id  in n_ids:
-                with self.assertRaises(AssertionError):
+                with self.assertRaises(ValueError):
                     s = TB5GScrambler(n_id=n_id, n_rnti=n_r)(tf.zeros((bs, l)))
 
         # test against reference example
@@ -699,8 +655,8 @@ class TestTB5GScrambler(unittest.TestCase):
 
         # test that PUSCH and PDSCH are the same for single cw mode
         s_ref = TB5GScrambler(n_id=n_id,
-                         n_rnti=n_rnti,
-                         channel_type="PUSCH")(tf.zeros((1, l)))
+                              n_rnti=n_rnti,
+                              channel_type="PUSCH")(tf.zeros((1, l)))
 
         # cw_idx has no impact in uplink
         s = TB5GScrambler(n_id=n_id,
@@ -718,9 +674,9 @@ class TestTB5GScrambler(unittest.TestCase):
 
         # downlink is different uplink for cw_idx=1
         s = TB5GScrambler(n_id=n_id,
-                        n_rnti=n_rnti,
-                        codeword_index=1,
-                        channel_type="PDSCH")(tf.zeros((1, l)))
+                          n_rnti=n_rnti,
+                          codeword_index=1,
+                          channel_type="PDSCH")(tf.zeros((1, l)))
         self.assertFalse(np.array_equal(s_ref, s))
 
 

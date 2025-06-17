@@ -1,27 +1,10 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
+
 import unittest
-import pytest
 import numpy as np
-import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
-from sionna.ofdm import ResourceGrid, PilotPattern, EmptyPilotPattern, KroneckerPilotPattern
+from sionna.phy.ofdm import PilotPattern, EmptyPilotPattern
 
 class TestPilotPattern(unittest.TestCase):
     """Unittest for the PilotPattern Class"""
@@ -79,15 +62,6 @@ class TestPilotPattern(unittest.TestCase):
         pp = PilotPattern(mask, pilots)
         self.assertEqual(pp.num_pilot_symbols, 128)
         self.assertEqual(pp.num_data_symbols, 12*64)
-
-    def test_trainable_pilots(self):
-        mask = np.zeros([1,2,14,64], bool)
-        mask[0,0,0,:] = True
-        mask[0,1,1,:] = True
-        num_pilots = np.max(np.sum(mask, (-2,-1)))
-        pilots = np.zeros([1,2,num_pilots], np.complex64)
-        pp = PilotPattern(mask, pilots, trainable=True)
-        self.assertTrue(pp.pilots.trainable)
 
     def test_normalized_pilots(self):
         mask = np.zeros([1,2,14,64], bool)

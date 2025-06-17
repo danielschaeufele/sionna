@@ -1,32 +1,15 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-
-import unittest
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
+import pytest
+import os
 import numpy as np
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
-
 import json
-import scipy
 import numpy as np
-from sionna.nr import PUSCHConfig, PUSCHTransmitter
+from sionna.phy.nr import PUSCHConfig, PUSCHTransmitter
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def run_test(test_name):
     # Load data
@@ -68,45 +51,43 @@ def run_test(test_name):
     x_grid = tf.transpose(x_grid[0,0], perm=[2,1,0])
     return np.allclose(tf.squeeze(x_grid), grid)
 
-class TestPUSCHTransmitter(unittest.TestCase):
-    """Tests for PUSCHTransmitter"""
+@pytest.mark.usefixtures("only_gpu")
+@pytest.mark.parametrize("test_id", list(range(0,83)))
+def tests_against_reference(test_id):
+    """Test PUSCHTransmitter output against reference"""
+    test_name = script_dir+f"/pusch_test_configs/test_{test_id}"
+    assert run_test(test_name)
 
-    def tests_against_reference(self):
-        """Test PUSCHTransmitter output against reference"""
-        for i in range(0,83):
-            test_name = f"unit/nr/pusch_test_configs/test_{i}"
-            self.assertTrue(run_test(test_name))
+def test_against_reference_transform_precoding():
+    """Test PUSCHTransmitter output against reference MATLAB implementation
+    with transform precoding enabled"""
+    pusch_config = PUSCHConfig()
+    pusch_config.carrier.subcarrier_spacing = 30
+    pusch_config.carrier.n_size_grid = 273
+    pusch_config.carrier.n_cell_id = 1
+    pusch_config.n_rnti = 42
+    pusch_config.tb.mcs_index = 9
+    pusch_config.transform_precoding = True
+    pusch_config.dmrs.n_sid = 3
 
-    def test_against_reference_transform_precoding(self):
-        """Test PUSCHTransmitter output against reference MATLAB implementation
-        with transform precoding enabled"""
-        pusch_config = PUSCHConfig()
-        pusch_config.carrier.subcarrier_spacing = 30
-        pusch_config.carrier.n_size_grid = 273
-        pusch_config.carrier.n_cell_id = 1
-        pusch_config.n_rnti = 42
-        pusch_config.tb.mcs_index = 9
-        pusch_config.transform_precoding = True
-        pusch_config.dmrs.n_sid = 3
+    ref_data = np.load("unit/nr/pusch_transmitter_transform_precoding.npz")
 
-        ref_data = np.load("unit/nr/pusch_transmitter_transform_precoding.npz")
+    pusch_transmitter = PUSCHTransmitter(pusch_config, return_bits=False)
+    x_grid = pusch_transmitter(ref_data["bits"])
 
-        pusch_transmitter = PUSCHTransmitter(pusch_config, return_bits=False)
-        x_grid = pusch_transmitter(ref_data["bits"])
+    np.testing.assert_array_almost_equal(x_grid, ref_data["grid"])
 
-        np.testing.assert_array_almost_equal(x_grid, ref_data["grid"])
+def test_modulation_parameters():
+    """Test parameters for OFDMModulator"""
+    pusch_config = PUSCHConfig()
+    pusch_config.carrier.subcarrier_spacing = 30
+    pusch_config.n_size_bwp = 273
+    pusch_config.sample_rate = "standard"
 
-    def test_modulation_parameters(self):
-        """Test parameters for OFDMModulator"""
-        pusch_config = PUSCHConfig()
-        pusch_config.carrier.subcarrier_spacing = 30
-        pusch_config.n_size_bwp = 273
-        pusch_config.sample_rate = "standard"
-
-        pt = PUSCHTransmitter(pusch_config, output_domain="time")
-        self.assertEqual(pusch_config.fft_size, 4096)
-        self.assertAlmostEqual(pusch_config.sample_rate, 122.88e6)
-        self.assertEqual(pt.resource_grid.fft_size, 4096)
-        self.assertEqual(pt.resource_grid.num_effective_subcarriers, 3276)
-        np.testing.assert_array_equal(pt._ofdm_modulator.cyclic_prefix_length,
-                                      [352] + [288]*13)
+    pt = PUSCHTransmitter(pusch_config, output_domain="time")
+    np.testing.assert_equal(pusch_config.fft_size, 4096)
+    np.testing.assert_almost_equal(pusch_config.sample_rate, 122.88e6)
+    np.testing.assert_equal(pt.resource_grid.fft_size, 4096)
+    np.testing.assert_equal(pt.resource_grid.num_effective_subcarriers, 3276)
+    np.testing.assert_array_equal(pt._ofdm_modulator.cyclic_prefix_length,
+                                  [352] + [288]*13)

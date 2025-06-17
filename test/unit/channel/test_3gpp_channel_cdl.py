@@ -1,30 +1,11 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
-
-import sionna
 import unittest
 import numpy as np
-from sionna.channel.tr38901 import CDL, PanelArray
+from sionna.phy.channel.tr38901 import CDL, PanelArray
 from channel_test_utils import *
-
 
 class TestCDL(unittest.TestCase):
     r"""Test the 3GPP CDL channel model
@@ -50,10 +31,6 @@ class TestCDL(unittest.TestCase):
 
     def setUpClass():
 
-        # Forcing the seed to make the tests deterministic
-        tf.random.set_seed(42)
-        np.random.seed(42)
-
         # Dict for storing the samples
         TestCDL.powers = {}
         TestCDL.delays = {}
@@ -71,14 +48,14 @@ class TestCDL(unittest.TestCase):
                                 polarization_type='V',
                                 antenna_pattern='omni',
                                 carrier_frequency=TestCDL.CARRIER_FREQUENCY,
-                                dtype=tf.complex128)
+                                precision="double")
         rx_array = PanelArray(  num_rows_per_panel=1,
                                 num_cols_per_panel=1,
                                 polarization='single',
                                 polarization_type='V',
                                 antenna_pattern='omni',
                                 carrier_frequency=TestCDL.CARRIER_FREQUENCY,
-                                dtype=tf.complex128)
+                                precision="double")
 
         ########## CDL-A
         cdl = CDL(  "A",
@@ -87,7 +64,7 @@ class TestCDL(unittest.TestCase):
                     ut_array=rx_array,
                     bs_array=tx_array,
                     direction='downlink',
-                    dtype=tf.complex128)
+                    precision="double")
         a,tau = cdl(100000, 1, 100e6)
         a = a[:,0,0,0,0,:,0].numpy()
         tau = tau.numpy()[0,0,0]
@@ -107,7 +84,7 @@ class TestCDL(unittest.TestCase):
                     ut_array=rx_array,
                     bs_array=tx_array,
                     direction='downlink',
-                    dtype=tf.complex128)
+                    precision="double")
         a,tau = cdl(100000, 1, 100e6)
         a = a[:,0,0,0,0,:,0].numpy()
         tau = tau.numpy()[0,0,0]
@@ -127,7 +104,7 @@ class TestCDL(unittest.TestCase):
                     ut_array=rx_array,
                     bs_array=tx_array,
                     direction='downlink',
-                    dtype=tf.complex128)
+                    precision="double")
         a,tau = cdl(100000, 1, 100e6)
         a = a[:,0,0,0,0,:,0].numpy()
         tau = tau.numpy()[0,0,0]
@@ -147,7 +124,7 @@ class TestCDL(unittest.TestCase):
                     ut_array=rx_array,
                     bs_array=tx_array,
                     direction='downlink',
-                    dtype=tf.complex128)
+                    precision="double")
         a,tau = cdl(100000, 1, 100e6)
         a = a[:,0,0,0,0,:,0].numpy()
         tau = tau.numpy()[0,0,0]
@@ -167,7 +144,7 @@ class TestCDL(unittest.TestCase):
                     ut_array=rx_array,
                     bs_array=tx_array,
                     direction='downlink',
-                    dtype=tf.complex128)
+                    precision="double")
         a,tau = cdl(100000, 1, 100e6)
         a = a[:,0,0,0,0,:,0].numpy()
         tau = tau.numpy()[0,0,0]

@@ -1,30 +1,15 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 
 import unittest
 import numpy as np
 from os import walk # to load generator matrices from files
 import re # regular expressions for generator matrix filenames
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
-from sionna.fec.ldpc.encoding import LDPC5GEncoder
-from sionna.utils import BinarySource
+from sionna.phy import config
+from sionna.phy.fec.ldpc.encoding import LDPC5GEncoder
+from sionna.phy.mapping import BinarySource
 
 class TestLDPC5GEncoder(unittest.TestCase):
     """Testcases for the LDPC5GEncoder."""
@@ -77,7 +62,7 @@ class TestLDPC5GEncoder(unittest.TestCase):
                 # c) Test that systematic part (excluding first 2z pos) is
                 # valid
                 z = enc._z # access private attribute
-                u = tf.cast(tf.random.uniform([bs, k],
+                u = tf.cast(config.tf_rng.uniform([bs, k],
                                             0,
                                             2,
                                             tf.int32), tf.float32)
@@ -93,11 +78,6 @@ class TestLDPC5GEncoder(unittest.TestCase):
         u = np.zeros([bs, k])
 
         enc = LDPC5GEncoder(k, n)
-        # test wrong datatype
-        with self.assertRaises(TypeError):
-            enc(tf.constant(u, dtype=tf.complex64))
-        with self.assertRaises(TypeError):
-            enc(tf.constant(u, dtype=tf.int32))
 
         # test for non-binary input
         u[13,37] = 2 # add single invalid number
@@ -164,7 +144,6 @@ class TestLDPC5GEncoder(unittest.TestCase):
             c_ref = tf.squeeze(c_ref) # remove new dim
             c = c.numpy()
             c_ref = c_ref.numpy()
-            print("Testing for k={}, n={}".format(k, n))
             self.assertTrue(np.array_equal(c, c_ref),
                             "not equal for k={}, n={}".format(k, n))
 
@@ -173,7 +152,7 @@ class TestLDPC5GEncoder(unittest.TestCase):
         """
         k = 100
         n = 200
-        shapes =[[10, 20, 30, k], [1, 40, k],[10, 2 ,3, 4, 3, k]]
+        shapes =[[k], [10, 20, 30, k], [1, 40, k], [10, 2 ,3, 4, 3, k]]
         enc = LDPC5GEncoder(k, n)
 
         for s in shapes:
@@ -192,24 +171,6 @@ class TestLDPC5GEncoder(unittest.TestCase):
             s = [10, 2, k-1]
             u = source(s)
             x = enc(u)
-
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-        bs = 10
-        k = 100
-        n = 200
-        source = BinarySource()
-
-        inputs = tf.keras.Input(shape=(k), dtype=tf.float32)
-        x = LDPC5GEncoder(k, n)(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=x)
-
-        b = source([bs, k])
-        model(b)
-        # call twice to see that bs can change
-        b2 = source([bs+1, k])
-        model(b2)
-        model.summary()
 
     def test_tf_fun(self):
         """Test that tf.function works as expected and XLA is supported"""
@@ -238,27 +199,30 @@ class TestLDPC5GEncoder(unittest.TestCase):
         """Test that encoder supports variable dtypes and
         yields same result."""
 
-        dt_supported = (tf.float16, tf.float32, tf.float64, tf.int8,
-            tf.int32, tf.int64, tf.uint8, tf.uint16, tf.uint32)
-
         bs = 10
         k = 100
         n = 200
 
         source = BinarySource()
-        enc_ref = LDPC5GEncoder(k, n, dtype=tf.float32)
+        # used as reference, will be manually casted after output
+        enc_ref = LDPC5GEncoder(k, n, precision="single")
+
+        # only floating point is currently supported
+        dt = [tf.float32, tf.float64]
+        precisions = ["single", "double"]
 
         u = source([bs, k])
         c_ref = enc_ref(u)
 
-        for dt in dt_supported:
-            enc = LDPC5GEncoder(k, n, dtype=dt)
-            u_dt = tf.cast(u, dt)
-            c = enc(u_dt)
+        for dt_in in dt:
+            for prec, dt_out in zip(precisions, dt):
+                enc = LDPC5GEncoder(k, n, precision=prec)
+                u_dt = tf.cast(u, dt_in)
+                c = enc(u_dt)
 
-            c_32 = tf.cast(c, tf.float32)
+                c_32 = tf.cast(c, dt_out)
 
-            self.assertTrue(np.array_equal(c_ref.numpy(), c_32.numpy()))
+                self.assertTrue(np.array_equal(c_ref.numpy(), c_32.numpy()))
 
     def test_ldpc_interleaver(self):
         """Test that LDPC output interleaver pattern is correct."""

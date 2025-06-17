@@ -1,33 +1,13 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-
-from numpy.lib.utils import info
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 
 import unittest
 import numpy as np
-from os import walk # to load generator matrices from files
-import re # regular expressions for generator matrix filenames
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except Runtime as e:
-        print(e)
-from sionna.fec.polar.utils import generate_5g_ranking, generate_rm_code, generate_dense_polar
-from sionna.fec.polar import PolarEncoder
-from sionna.utils import BinarySource
+from sionna.phy.fec.polar.utils import generate_5g_ranking, generate_rm_code, generate_dense_polar
+from sionna.phy.fec.polar import PolarEncoder
+from sionna.phy.mapping import BinarySource
 
 class TestPolarUtils(unittest.TestCase):
     """Test polar utils.
@@ -40,7 +20,7 @@ class TestPolarUtils(unittest.TestCase):
         param_invalid = [[-1, 32],[10,-3],[1.0, 32],[3, 32.],[33,32], [10, 31],
                          [1025, 2048], [16, 33], [7, 16], [1000, 2048]] # (k,n)
         for p in param_invalid:
-            with self.assertRaises(AssertionError):
+            with self.assertRaises(BaseException):
                 generate_5g_ranking(p[0],p[1])
 
         param_valid = [[1, 512],[10,32],[1000, 1024],[3, 256], [10,64], [0,32],

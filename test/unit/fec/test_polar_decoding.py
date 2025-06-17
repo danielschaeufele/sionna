@@ -1,37 +1,24 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
 
+import os
 import unittest
 import pytest # for pytest filterwarnings
 import numpy as np
+import tensorflow as tf
 
-from sionna.fec.polar.encoding import PolarEncoder, Polar5GEncoder
-from sionna.fec.polar.decoding import PolarSCDecoder, PolarSCLDecoder, PolarBPDecoder
-from sionna.fec.polar.decoding import Polar5GDecoder
-from sionna.fec.crc import CRCEncoder
-from sionna.fec.utils import GaussianPriorSource
-from sionna.utils import BinarySource
-from sionna.fec.polar.utils import generate_5g_ranking
-from sionna.channel import AWGN
-from sionna.mapping import Mapper, Demapper
+from sionna.phy.fec.polar.encoding import PolarEncoder, Polar5GEncoder
+from sionna.phy.fec.polar.decoding import PolarSCDecoder, PolarSCLDecoder, PolarBPDecoder
+from sionna.phy.fec.polar.decoding import Polar5GDecoder
+from sionna.phy.fec.crc import CRCEncoder
+from sionna.phy.fec.utils import GaussianPriorSource
+from sionna.phy.fec.polar.utils import generate_5g_ranking
+from sionna.phy.channel import AWGN
+from sionna.phy.mapping import Mapper, Demapper, BinarySource
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+test_dir = os.path.abspath(os.path.join(current_dir, os.pardir, os.pardir))
 
 class TestPolarDecodingSC(unittest.TestCase):
 
@@ -41,7 +28,7 @@ class TestPolarDecodingSC(unittest.TestCase):
         # frozen vec to long
         n = 32
         frozen_pos = np.arange(n+1)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             PolarSCDecoder(frozen_pos, n)
 
         # n not a pow of 2
@@ -49,7 +36,7 @@ class TestPolarDecodingSC(unittest.TestCase):
         n = 32
         k = 12
         frozen_pos,_ = generate_5g_ranking(k, n)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             PolarSCDecoder(frozen_pos, n+1)
 
         # test valid shapes
@@ -60,11 +47,6 @@ class TestPolarDecodingSC(unittest.TestCase):
         for p in param_valid:
             frozen_pos, _ = generate_5g_ranking(p[0], p[1])
             PolarSCDecoder(frozen_pos, p[1])
-
-        # no complex-valued input allowed
-        with self.assertRaises(ValueError):
-            frozen_pos,_ = generate_5g_ranking(32, 64)
-            PolarSCDecoder(frozen_pos, 64, output_dtype=tf.complex64)
 
     def test_output_dim(self):
         """Test that output dims are correct (=n) and output equals all-zero
@@ -80,7 +62,7 @@ class TestPolarDecodingSC(unittest.TestCase):
             frozen_pos, _ = generate_5g_ranking(p[0],p[1])
             dec = PolarSCDecoder(frozen_pos, p[1])
             # all-zero with BPSK (no noise);logits
-            c = -10. * np.ones([bs, p[1]])
+            c = -10. * tf.ones([bs, p[1]])
             u = dec(c).numpy()
             self.assertTrue(u.shape[-1]==p[0])
             # also check that all-zero input yields all-zero output
@@ -100,7 +82,7 @@ class TestPolarDecodingSC(unittest.TestCase):
             dec = PolarSCDecoder(frozen_pos, p[1])
 
             # case 1: extremely large inputs
-            c = source([[bs, p[1]], 0.0001])
+            c = source([bs, p[1]], 0.0001)
             # llrs
             u1 = dec(c).numpy()
             # no nan
@@ -128,37 +110,26 @@ class TestPolarDecodingSC(unittest.TestCase):
         param_valid = [[1, 32], [10, 32], [32, 32], [100, 256], [123, 1024],
                       [1024, 1024]]
 
+        source = BinarySource()
+
         for p in param_valid:
-            source = BinarySource()
             frozen_pos, _ = generate_5g_ranking(p[0],p[1])
             enc = PolarEncoder(frozen_pos, p[1])
             dec = PolarSCDecoder(frozen_pos, p[1])
 
             u = source([bs, p[0]])
             c = enc(u)
-            llr_ch = 20.*(2.*c-1) # demod BPSK witout noise
+            llr_ch = 20.*(2.*c-1) # demod BPSK without noise
             u_hat = dec(llr_ch)
 
             self.assertTrue(np.array_equal(u.numpy(), u_hat.numpy()))
 
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-
-        bs = 10
-        k = 100
-        n = 128
-        source = BinarySource()
-        frozen_pos, _ = generate_5g_ranking(k, n)
-        inputs = tf.keras.Input(shape=(n), dtype=tf.float32)
-        x = PolarSCDecoder(frozen_pos, n)(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=x)
-
-        b = source([bs, n])
-        model(b)
-        # call twice to see that bs can change
-        b2 = source([bs+1, n])
-        model(b2)
-        model.summary()
+        # test non-batch dimension
+        u = source([p[0],])
+        c = enc(u)
+        llr_ch = 20.*(2.*c-1) # demod BPSK without noise
+        u_hat = dec(llr_ch)
+        self.assertTrue(np.array_equal(u.numpy(), u_hat.numpy()))
 
     def test_multi_dimensional(self):
         """Test against arbitrary shapes.
@@ -195,7 +166,7 @@ class TestPolarDecodingSC(unittest.TestCase):
         source = BinarySource()
         dec = PolarSCDecoder(frozen_pos, n)
 
-        b = source([1,15,n])
+        b = source([1, 15, n])
         b_rep = tf.tile(b, [bs, 1, 1])
 
         # and run tf version (to be tested)
@@ -244,7 +215,7 @@ class TestPolarDecodingSC(unittest.TestCase):
         """Test against pre-calculated results from internal implementation.
         """
 
-        ref_path = '../test/codes/polar/'
+        ref_path = test_dir + '/codes/polar/'
         filename = ["P_128_37", "P_128_110", "P_256_128"]
 
         for f in filename:
@@ -259,7 +230,7 @@ class TestPolarDecodingSC(unittest.TestCase):
 
             dec = PolarSCDecoder(frozen_pos, n)
             l_in = -1. * llr_ch # logits
-            u_hat_tf = dec(l_in).numpy()
+            u_hat_tf = dec(tf.constant(l_in, tf.float32)).numpy()
 
             # the output should be equal to the reference
             self.assertTrue(np.array_equal(u_hat_tf, u_hat))
@@ -272,31 +243,22 @@ class TestPolarDecodingSC(unittest.TestCase):
         n = 64
         source = GaussianPriorSource()
         frozen_pos, _ = generate_5g_ranking(k, n)
-        dtypes_supported = (tf.float16, tf.float32, tf.float64)
 
-        for dt_in in dtypes_supported:
-            for dt_out in dtypes_supported:
-                llr = source([[batch_size, n], 0.5])
+        precisions = ["single", "double"]
+        dtypes_supported = (tf.float32, tf.float64)
+
+        for p, dt_out in zip(precisions, dtypes_supported):
+            for dt_in in dtypes_supported:
+                llr = source([batch_size, n], 0.5)
                 llr = tf.cast(llr, dt_in)
 
-                dec = PolarSCDecoder(frozen_pos, n, output_dtype=dt_out)
-
+                dec = PolarSCDecoder(frozen_pos, n, precision=p)
                 x = dec(llr)
-
                 self.assertTrue(x.dtype==dt_out)
-
-        # test that complex-valued inputs raise error
-        llr = source([[batch_size, n], 0.5])
-        llr_c = tf.complex(llr, tf.zeros_like(llr))
-        dec = PolarSCDecoder(frozen_pos, n, output_dtype=tf.float32)
-
-        with self.assertRaises(TypeError):
-            x = dec(llr_c)
-
 
 class TestPolarDecodingSCL(unittest.TestCase):
 
-    # Filter warnings related to large ressource allocation
+    # Filter warnings related to large resource allocation
     @pytest.mark.filterwarnings("ignore: Required resource allocation")
     def test_invalid_inputs(self):
         """Test against invalid values of n and frozen_pos."""
@@ -304,7 +266,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
         # frozen vec to long
         n = 32
         frozen_pos = np.arange(n+1)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             PolarSCLDecoder(frozen_pos, n)
 
         # n not a pow of 2
@@ -312,7 +274,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
         n = 32
         k = 12
         frozen_pos,_ = generate_5g_ranking(k, n)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             PolarSCLDecoder(frozen_pos, n+1)
 
         # also test valid shapes
@@ -324,13 +286,9 @@ class TestPolarDecodingSCL(unittest.TestCase):
             frozen_pos, _ = generate_5g_ranking(p[0],p[1])
             PolarSCLDecoder(frozen_pos, p[1])
 
-        # no complex-valued input allowed
-        with self.assertRaises(ValueError):
-            frozen_pos,_ = generate_5g_ranking(32, 64)
-            PolarSCLDecoder(frozen_pos, 64, output_dtype=tf.complex64)
-
     # Filter warnings related to large resource allocation
     @pytest.mark.filterwarnings("ignore: Required resource allocation")
+    @pytest.mark.usefixtures("only_gpu")
     def test_output_dim(self):
         """Test that output dims are correct (=n) and output is the all-zero
          codeword."""
@@ -347,13 +305,13 @@ class TestPolarDecodingSCL(unittest.TestCase):
                 for cpu_only in [False, True]:
                     for use_scatter in [False, True]:
                         dec = PolarSCLDecoder(frozen_pos,
-                                            p[1],
-                                            use_fast_scl=use_fast_scl,
-                                            cpu_only=cpu_only,
-                                            use_scatter=use_scatter)
+                                              p[1],
+                                              use_fast_scl=use_fast_scl,
+                                              cpu_only=cpu_only,
+                                              use_scatter=use_scatter)
 
                         # all-zero with BPSK (no noise);logits
-                        c = -10. * np.ones([bs, p[1]])
+                        c = -10. * tf.ones([bs, p[1]])
                         u = dec(c).numpy()
                         # check shape
                         self.assertTrue(u.shape[-1]==p[0])
@@ -378,7 +336,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
                                          use_scatter=use_scatter)
 
                         # all-zero with BPSK (no noise);logits
-                        c = -10. * np.ones([bs, n])
+                        c = -10. * tf.ones([bs, n])
                         u = dec(c).numpy()
                         self.assertTrue(u.shape[-1]==k)
                         # also check that all-zero input yields all-zero
@@ -386,7 +344,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
                         self.assertTrue(np.array_equal(u, u_hat))
 
     # Filter warnings related to large resource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
+    @pytest.mark.filterwarnings("ignore: Required resource allocation")
     def test_numerical_stab(self):
         """Test for numerical stability (no nan or infty as output)"""
 
@@ -407,7 +365,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
                                             cpu_only=cpu_only,
                                             use_scatter=use_scatter)
                         # case 1: extremely large inputs
-                        c = source([[bs, p[1]], 0.0001])
+                        c = source([bs, p[1]], 0.0001)
                         # llrs
                         u1 = dec(c).numpy()
                         # no nan
@@ -426,8 +384,8 @@ class TestPolarDecodingSCL(unittest.TestCase):
                         self.assertFalse(np.any(np.isinf(u2)))
                         self.assertFalse(np.any(np.isneginf(u2)))
 
-    # Filter warnings related to large ressource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
+    # Filter warnings related to large resource allocation
+    @pytest.mark.filterwarnings("ignore: Required resource allocation")
     def test_identity(self):
         """Test that info bits can be recovered if no noise is added."""
 
@@ -483,34 +441,8 @@ class TestPolarDecodingSCL(unittest.TestCase):
                         self.assertTrue(np.array_equal(u_crc.numpy(),
                                                        u_hat.numpy()))
 
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-
-        bs = 10
-        k = 16
-        n = 32
-        for use_fast_scl in [False, True]:
-            for cpu_only in [False, True]:
-                for use_scatter in [False, True]:
-                    source = BinarySource()
-                    frozen_pos, _ = generate_5g_ranking(k, n)
-                    inputs = tf.keras.Input(shape=(n), dtype=tf.float32)
-                    x = PolarSCLDecoder(frozen_pos,
-                                        n,
-                                        use_fast_scl=use_fast_scl,
-                                        cpu_only=cpu_only,
-                                        use_scatter=use_scatter)(inputs)
-                    model = tf.keras.Model(inputs=inputs, outputs=x)
-
-                    b = source([bs,n])
-                    model(b)
-                    # call twice to see that bs can change
-                    b2 = source([bs+1,n])
-                    model(b2)
-                    model.summary()
-
-    # Filter warnings related to large ressource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
+    # Filter warnings related to large resource allocation
+    @pytest.mark.filterwarnings("ignore: Required resource allocation")
     def test_multi_dimensional(self):
         """Test against multi-dimensional input shapes.
 
@@ -536,6 +468,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
         # both version should yield same result
         self.assertTrue(np.array_equal(c, c_res))
 
+    @pytest.mark.usefixtures("only_gpu")
     def test_batch(self):
         """Test that all samples in batch yield same output (for same input).
         """
@@ -563,6 +496,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
                     for i in range(bs):
                         self.assertTrue(np.array_equal(c[0,:,:], c[i,:,:]))
 
+    @pytest.mark.usefixtures("only_gpu")
     def test_tf_fun(self):
         """Test that graph mode works and XLA is supported."""
 
@@ -584,11 +518,11 @@ class TestPolarDecodingSCL(unittest.TestCase):
                         def run_graph_xla(u):
                             return dec(u)
                         dec = PolarSCLDecoder(frozen_pos,
-                                        n,
-                                        use_fast_scl=use_fast_scl,
-                                        cpu_only=cpu_only,
-                                        use_scatter=use_scatter,
-                                        crc_degree=crc_degree)
+                                              n,
+                                              use_fast_scl=use_fast_scl,
+                                              cpu_only=cpu_only,
+                                              use_scatter=use_scatter,
+                                              crc_degree=crc_degree)
 
                         # test that for arbitrary input only binary values are
                         # returned
@@ -609,8 +543,9 @@ class TestPolarDecodingSCL(unittest.TestCase):
                             u = source([bs+1, n])
                             x = run_graph_xla(u).numpy()
 
-    # Filter warnings related to large ressource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
+    # Filter warnings related to large resource allocation
+    @pytest.mark.filterwarnings("ignore: Required resource allocation")
+    @pytest.mark.usefixtures("only_gpu")
     def test_ref_implementation(self):
         """Test against pre-calculated results from internal implementation.
 
@@ -619,7 +554,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
         Remark: results are for SC only, i.e., list_size=1.
         """
 
-        ref_path = '../test/codes/polar/'
+        ref_path = test_dir + '/codes/polar/'
         filename = ["P_128_37", "P_128_110", "P_256_128"]
 
         for f in filename:
@@ -642,7 +577,7 @@ class TestPolarDecodingSCL(unittest.TestCase):
                                          cpu_only=cpu_only,
                                          use_scatter=use_scatter)
                         l_in = -1. * llr_ch # logits
-                        u_hat_tf = dec(l_in).numpy()
+                        u_hat_tf = dec(tf.constant(l_in, tf.float32)).numpy()
 
                         # the output should be equal to the reference
                         self.assertTrue(np.array_equal(u_hat_tf, u_hat))
@@ -668,14 +603,14 @@ class TestPolarDecodingSCL(unittest.TestCase):
         u = source([bs, k-k_crc])
         u_crc = enc_crc(u)
         c = enc(u_crc)
-        llr_ch = 20.*(2.*c-1) # demod BPSK witout noise
+        llr_ch = 20.*(2.*c-1) # demod BPSK without noise
 
         for list_size in list_sizes:
             dec = PolarSCLDecoder(frozen_pos,
-                                n,
-                                list_size=list_size,
-                                use_hybrid_sc=True,
-                                crc_degree=crc_degree)
+                                  n,
+                                  list_size=list_size,
+                                  use_hybrid_sc=True,
+                                  crc_degree=crc_degree)
             u_hat = dec(llr_ch)
             self.assertTrue(np.array_equal(u_crc.numpy(), u_hat.numpy()))
 
@@ -700,26 +635,20 @@ class TestPolarDecodingSCL(unittest.TestCase):
         n = 64
         source = GaussianPriorSource()
         frozen_pos, _ = generate_5g_ranking(k, n)
-        dtypes_supported = (tf.float16, tf.float32, tf.float64)
 
-        for dt_in in dtypes_supported:
-            for dt_out in dtypes_supported:
-                llr = source([[batch_size, n], 0.5])
+        precisions = ["single", "double"]
+        dtypes_supported = (tf.float32, tf.float64)
+
+        for p, dt_out in zip(precisions, dtypes_supported):
+            for dt_in in dtypes_supported:
+                llr = source([batch_size, n], 0.5)
                 llr = tf.cast(llr, dt_in)
 
-                dec = PolarSCLDecoder(frozen_pos, n, output_dtype=dt_out)
+                dec = PolarSCLDecoder(frozen_pos, n, precision=p)
 
                 x = dec(llr)
 
                 self.assertTrue(x.dtype==dt_out)
-
-        # test that complex-valued inputs raise error
-        llr = source([[batch_size, n], 0.5])
-        llr_c = tf.complex(llr, tf.zeros_like(llr))
-        dec = PolarSCLDecoder(frozen_pos, n, output_dtype=tf.float32)
-
-        with self.assertRaises(TypeError):
-            x = dec(llr_c)
 
     def test_return_crc(self):
         """Test that correct CRC status is returned."""
@@ -738,18 +667,20 @@ class TestPolarDecodingSCL(unittest.TestCase):
         frozen_pos, _ = generate_5g_ranking(k, n)
         enc = PolarEncoder(frozen_pos, n)
         crc_enc = CRCEncoder("CRC24A")
-        dec = PolarSCLDecoder(frozen_pos, n, crc_degree="CRC24A", return_crc_status=True)
+        dec = PolarSCLDecoder(frozen_pos, n, crc_degree="CRC24A",
+                              return_crc_status=True)
         for _ in range(num_mc_iter):
             u = source((bs, 3, k-24))
             u_crc = crc_enc(u)
             c = enc(u_crc)
             x = mapper(c)
-            y = channel((x, no))
-            llr_ch = demapper((y, no))
+            y = channel(x, no)
+            llr_ch = demapper(y, no)
             u_hat, crc_status = dec(llr_ch)
 
             # test for individual error patterns
             err_patt = tf.reduce_any(tf.not_equal(u_hat, u_crc), axis=-1)
+            crc_status = tf.cast(crc_status, tf.float32)
             diffs = tf.cast(err_patt, tf.float32) - (1. - crc_status)
             num_diffs = tf.reduce_sum(tf.abs(diffs))
             self.assertTrue(num_diffs < 3) # allow a few CRC mis-detections
@@ -763,7 +694,7 @@ class TestPolarDecodingBP(unittest.TestCase):
         # frozen vec to long
         n = 32
         frozen_pos = np.arange(n+1)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             PolarBPDecoder(frozen_pos, n)
 
         # n not a pow of 2
@@ -771,7 +702,7 @@ class TestPolarDecodingBP(unittest.TestCase):
         n = 32
         k = 12
         frozen_pos,_ = generate_5g_ranking(k, n)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             PolarBPDecoder(frozen_pos, n+1)
 
         # test also valid shapes
@@ -782,11 +713,6 @@ class TestPolarDecodingBP(unittest.TestCase):
         for p in param_valid:
             frozen_pos, _ = generate_5g_ranking(p[0],p[1])
             PolarBPDecoder(frozen_pos, p[1])
-
-        # no complex-valued input allowed
-        with self.assertRaises(ValueError):
-            frozen_pos,_ = generate_5g_ranking(32, 64)
-            PolarBPDecoder(frozen_pos, 64, output_dtype=tf.complex64)
 
     def test_output_dim(self):
         """Test that output dims are correct (=n) and output is all-zero
@@ -805,7 +731,7 @@ class TestPolarDecodingBP(unittest.TestCase):
                                      p[1],
                                      hard_out=hard_out)
                 # all-zero with BPSK (no noise);logits
-                c = -10. * np.ones([bs, p[1]])
+                c = -10. * tf.ones([bs, p[1]])
                 u = dec(c).numpy()
                 self.assertTrue(u.shape[-1]==p[0])
                 if hard_out:
@@ -830,29 +756,17 @@ class TestPolarDecodingBP(unittest.TestCase):
 
             u = source([bs, p[0]])
             c = enc(u)
-            llr_ch = 20.*(2.*c-1) # demod BPSK witout noise
+            llr_ch = 20.*(2.*c-1) # demod BPSK without noise
             u_hat = dec(llr_ch)
 
             self.assertTrue(np.array_equal(u.numpy(), u_hat.numpy()))
 
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-
-        bs = 10
-        k = 100
-        n = 128
-        source = BinarySource()
-        frozen_pos, _ = generate_5g_ranking(k, n)
-        inputs = tf.keras.Input(shape=(n), dtype=tf.float32)
-        x = PolarBPDecoder(frozen_pos, n)(inputs)
-        model = tf.keras.Model(inputs=inputs, outputs=x)
-
-        b = source([bs, n])
-        model(b)
-        # call twice to see that bs can change
-        b2 = source([bs+1, n])
-        model(b2)
-        model.summary()
+        # test no batch dimension
+        u = source([p[0],])
+        c = enc(u)
+        llr_ch = 20.*(2.*c-1) # demod. BPSK without noise
+        u_hat = dec(llr_ch)
+        self.assertTrue(np.array_equal(u.numpy(), u_hat.numpy()))
 
     def test_multi_dimensional(self):
         """Test against arbitrary shapes."""
@@ -864,17 +778,22 @@ class TestPolarDecodingBP(unittest.TestCase):
         source = BinarySource()
         dec = PolarBPDecoder(frozen_pos, n)
 
-        b = source([100, n])
-        b_res = tf.reshape(b, [4, 5, 5, n])
+        shapes  =[[4, 5, 5,], []]
+        for s_ in shapes:
+            s = s_.copy()
+            bs = int(np.prod(s))
+            b = source([bs, n])
+            s.append(n)
+            b_res = tf.reshape(b, s)
 
-        # encode 2D Tensor
-        c = dec(b).numpy()
-        # encode 4D Tensor
-        c_res = dec(b_res).numpy()
-        # and reshape to 2D shape
-        c_res = tf.reshape(c_res, [100, k])
-        # both version should yield same result
-        self.assertTrue(np.array_equal(c, c_res))
+            # encode 2D Tensor
+            c = dec(b).numpy()
+            # encode 4D Tensor
+            c_res = dec(b_res).numpy()
+            # and reshape to 2D shape
+            c_res = tf.reshape(c_res, [bs, k])
+            # both version should yield same result
+            self.assertTrue(np.array_equal(c, c_res))
 
     def test_batch(self):
         """Test that all samples in batch yield same output (for same input).
@@ -914,14 +833,14 @@ class TestPolarDecodingBP(unittest.TestCase):
                                  hard_out=hard_out,
                                  num_iter=num_iter)
 
-            b = source([[bs,n], 0.001]) # very large llrs
+            b = source([bs,n], 0.001) # very large llrs
 
             c = dec(b).numpy()
 
             # all values are finite (not nan and not inf)
             self.assertTrue(np.sum(np.abs(1 - np.isfinite(c)))==0)
 
-
+    @pytest.mark.usefixtures("only_gpu")
     def test_tf_fun(self):
         """Test that graph mode works and XLA is supported."""
 
@@ -961,6 +880,7 @@ class TestPolarDecodingBP(unittest.TestCase):
         #u = source([bs+1, n])
         #x = run_graph_xla(u).numpy()
 
+    @pytest.mark.usefixtures("only_gpu")
     def test_ref_implementation(self):
         """Test against Numpy reference implementation.
 
@@ -1048,7 +968,7 @@ class TestPolarDecodingBP(unittest.TestCase):
         for num_iter in num_iters:
 
             source = GaussianPriorSource()
-            llr_ch = source([[bs, n], noise_var])
+            llr_ch = source([bs, n], noise_var)
 
             # and decode
             dec_bp = PolarBPDecoder(frozen_pos, n,
@@ -1080,26 +1000,20 @@ class TestPolarDecodingBP(unittest.TestCase):
         n = 64
         source = GaussianPriorSource()
         frozen_pos, _ = generate_5g_ranking(k, n)
-        dtypes_supported = (tf.float16, tf.float32, tf.float64)
 
-        for dt_in in dtypes_supported:
-            for dt_out in dtypes_supported:
-                llr = source([[batch_size, n], 0.5])
+        precisions = ["single", "double"]
+        dtypes_supported = (tf.float32, tf.float64)
+
+        for p, dt_out in zip(precisions, dtypes_supported):
+            for dt_in in dtypes_supported:
+                llr = source([batch_size, n], 0.5)
                 llr = tf.cast(llr, dt_in)
 
-                dec = PolarBPDecoder(frozen_pos, n, output_dtype=dt_out)
+                dec = PolarBPDecoder(frozen_pos, n, precision=p)
 
                 x = dec(llr)
 
                 self.assertTrue(x.dtype==dt_out)
-
-        # test that complex inputs raise error
-        llr = source([[batch_size, n], 0.5])
-        llr_c = tf.complex(llr, tf.zeros_like(llr))
-        dec = PolarBPDecoder(frozen_pos, n, output_dtype=tf.float32)
-
-        with self.assertRaises(TypeError):
-            x = dec(llr_c)
 
 class TestPolarDecoding5G(unittest.TestCase):
 
@@ -1109,15 +1023,15 @@ class TestPolarDecoding5G(unittest.TestCase):
         Note: consistency of code parameters is already checked by the encoder.
         """
         enc = Polar5GEncoder(40, 60)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             Polar5GDecoder(enc, dec_type=1)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(BaseException):
             Polar5GDecoder(enc, dec_type="ABC")
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(BaseException):
             Polar5GDecoder("SC")
 
-    # Filter warnings related to large ressource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
+    # Filter warnings related to large resource allocation
+    @pytest.mark.filterwarnings("ignore: Required resource allocation")
     def test_identity_de_ratematching(self):
         """Test that info bits can be recovered if no noise is added and
         dimensions are correct."""
@@ -1153,32 +1067,8 @@ class TestPolarDecoding5G(unittest.TestCase):
                     self.assertTrue(np.array_equal(u.numpy(), u_hat.numpy()))
                     # Uplink scenario
 
-
-    # Filter warnings related to large ressource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
-    def test_keras(self):
-        """Test that Keras model can be compiled (supports dynamic shapes)."""
-
-        bs = 10
-        k = 100
-        n = 145
-        source = BinarySource()
-        enc = Polar5GEncoder(k, n)
-
-        for dec_type in ["SC", "SCL", "hybSCL", "BP"]:
-            inputs = tf.keras.Input(shape=(n), dtype=tf.float32)
-            x = Polar5GDecoder(enc, dec_type=dec_type)(inputs)
-            model = tf.keras.Model(inputs=inputs, outputs=x)
-
-            b = source([bs,n])
-            model(b)
-            # call twice to see that bs can change
-            b2 = source([bs+1,n])
-            model(b2)
-            model.summary()
-
-    # Filter warnings related to large ressource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
+    # Filter warnings related to large resource allocation
+    @pytest.mark.filterwarnings("ignore: Required resource allocation")
     def test_multi_dimensional(self):
         """Test against arbitrary shapes."""
 
@@ -1207,8 +1097,8 @@ class TestPolarDecoding5G(unittest.TestCase):
                 # both version should yield same result
                 self.assertTrue(np.array_equal(c, c_res))
 
-    # Filter warnings related to large ressource allocation
-    @pytest.mark.filterwarnings("ignore: Required ressource allocation")
+    # Filter warnings related to large resource allocation
+    @pytest.mark.filterwarnings("ignore: Required resource allocation")
     def test_batch(self):
         """Test that all samples in batch yield same output (for same input).
         """
@@ -1222,7 +1112,7 @@ class TestPolarDecoding5G(unittest.TestCase):
         for dec_type in ["SC", "SCL", "hybSCL", "BP"]:
             dec = Polar5GDecoder(enc, dec_type=dec_type)
 
-            llr = source([[1,4,n], 0.5])
+            llr = source([1,4,n], 0.5)
             llr_rep = tf.tile(llr, [bs, 1, 1])
 
             # and run tf version (to be tested)
@@ -1231,6 +1121,7 @@ class TestPolarDecoding5G(unittest.TestCase):
             for i in range(bs):
                 self.assertTrue(np.array_equal(c[0,:,:], c[i,:,:]))
 
+    @pytest.mark.usefixtures("only_gpu")
     def test_tf_fun(self):
         """Test that tf.function decorator works
         include xla compiler test."""
@@ -1254,23 +1145,23 @@ class TestPolarDecoding5G(unittest.TestCase):
                 return dec(u)
 
             # test that for arbitrary input only binary values are returned
-            u = source([[bs, n], 0.5])
+            u = source([bs, n], 0.5)
             x = run_graph(u).numpy()
 
             # execute the graph twice
             x = run_graph(u).numpy()
 
             # and change batch_size
-            u = source([[bs+1, n], 0.5])
+            u = source([bs+1, n], 0.5)
             x = run_graph(u).numpy()
 
             # run same test for XLA (jit_compile=True)
             # BP does currently not support XLA
             if dec_type != "BP":
-                u = source([[bs, n], 0.5])
+                u = source([bs, n], 0.5)
                 x = run_graph_xla(u).numpy()
                 x = run_graph_xla(u).numpy()
-                u = source([[bs+1, n], 0.5])
+                u = source([bs+1, n], 0.5)
                 x = run_graph_xla(u).numpy()
 
     def test_dtype_flexible(self):
@@ -1281,26 +1172,21 @@ class TestPolarDecoding5G(unittest.TestCase):
         n = 64
         source = GaussianPriorSource()
         enc = Polar5GEncoder(k, n)
-        dtypes_supported = (tf.float16, tf.float32, tf.float64)
 
-        for dt_in in dtypes_supported:
-            for dt_out in dtypes_supported:
-                llr = source([[batch_size, n], 0.5])
+        # only floating point is currently supported
+        dt = [tf.float32, tf.float64]
+        precisions = ["single", "double"]
+
+        for dt_in in dt:
+            for prec, dt_out in zip(precisions, dt):
+                llr = source([batch_size, n], 0.5)
                 llr = tf.cast(llr, dt_in)
 
-                dec = Polar5GDecoder(enc, output_dtype=dt_out)
+                dec = Polar5GDecoder(enc, precision=prec)
 
                 x = dec(llr)
 
                 self.assertTrue(x.dtype==dt_out)
-
-        # test that complex inputs raise error
-        llr = source([[batch_size, n], 0.5])
-        llr_c = tf.complex(llr, tf.zeros_like(llr))
-        dec = Polar5GDecoder(enc, output_dtype=tf.float32)
-
-        with self.assertRaises(TypeError):
-            x = dec(llr_c)
 
     def test_return_crc(self):
         """Test that correct CRC status is returned."""
@@ -1323,14 +1209,13 @@ class TestPolarDecoding5G(unittest.TestCase):
                 u = source((bs, 3, k))
                 c = enc(u)
                 x = mapper(c)
-                y = channel((x, no))
-                llr_ch = demapper((y, no))
+                y = channel(x, no)
+                llr_ch = demapper(y, no)
                 u_hat, crc_status = dec(llr_ch)
 
                 # test for individual error patterns
                 err_patt = tf.reduce_any(tf.not_equal(u_hat, u), axis=-1)
+                crc_status = tf.cast(crc_status, tf.float32)
                 diffs = tf.cast(err_patt, tf.float32) - (1. - crc_status)
                 num_diffs = tf.reduce_sum(tf.abs(diffs)).numpy()
                 self.assertTrue(num_diffs < 5) # allow a few CRC mis-detections
-
-

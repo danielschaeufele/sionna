@@ -4,7 +4,77 @@
 
 We love to see how Sionna is used by other researchers! For this reason, you find below links to papers/projects whose authors have published Sionna-based simulation code.
 
-If you want your paper/project and code be listed here, please send an email to `sionna@nvidia.com <mailto:sionna@nvidia.com>`_ with links to the paper (e.g., `arXiv <https://arxiv.org>`_) and code repository (e.g., `GitHub <https://github.com>`_).
+.. made-with-sionna::
+    :title: Geo2SigMap: High-Fidelity RF Signal Mapping Using Geographic Databases
+    :authors: Yiming Li, Zeyu Li, Zhihui Gao, Tingjun Chen
+    :year: 2025
+    :version: 1.0
+    :link_arxiv: https://arxiv.org/abs/2312.14303
+    :link_github: https://github.com/functions-lab/geo2sigmap
+    :abstract: Radio frequency (RF) signal mapping, which is the process of analyzing and predicting the RF signal strength and distribution across specific areas, is crucial for cellular network planning and deployment. Traditional approaches to RF signal mapping rely on statistical models constructed based on measurement data, which offer low complexity but often lack accuracy, or ray tracing tools, which provide enhanced precision for the target area but suffer from increased computational complexity. Recently, machine learning (ML) has emerged as a data-driven method for modeling RF signal propagation, which leverages models trained on synthetic datasets to perform RF signal mapping in "unseen" areas. In this paper, we present Geo2SigMap, an ML-based framework for efficient and high-fidelity RF signal mapping using geographic databases. First, we develop an automated framework that seamlessly integrates three open-source tools: OpenStreetMap (geographic databases), Blender (computer graphics), and Sionna (ray tracing), enabling the efficient generation of large-scale 3D building maps and ray tracing models. Second, we propose a cascaded U-Net model, which is pre-trained on synthetic datasets and employed to generate detailed RF signal maps, leveraging environmental information and sparse measurement data. Finally, we evaluate the performance of Geo2SigMap via a real-world measurement campaign, where three types of user equipment (UE) collect over 45,000 data points related to cellular information from six LTE cells operating in the citizens broadband radio service (CBRS) band. Our results show that Geo2SigMap achieves an average root-mean-square-error (RMSE) of 6.04 dB for predicting the reference signal received power (RSRP) at the UE, representing an average RMSE improvement of 3.59 dB compared to existing methods.
+
+.. made-with-sionna::
+    :title: Multi-cell Outdoor Channel State Information Dataset (MOCSID)
+    :authors: Mohamed El Mehdi Makhlouf, Maxime Guillaud, Yamil Vindas Yassine
+    :year: 2025
+    :version: 0.19
+    :link_arxiv: https://hal.science/hal-05037063/
+    :link_github: https://gitlab.inria.fr/channelcharting/outdoor_dataset
+    :abstract: We introduce MOCSID, a multi-cell outdoor channel state information dataset of synthetic channel state information (CSI) samples mimicking an outdoor campus scenario, including multiple base stations with partially overlapping coverage  areas and pedestrian user mobility. The scenario is characterized by a high density of base stations (10 base stations within a 625m x 535 m area) and includes a mixture of non-line-of-sight and line-of-sight propagation. MOCSID includes user locations, timestamps, velocities, and multipath component information (delays and path coefficients). The pedestrian mobility follows realistic movement patterns generated via the probabilistic roadmap algorithm. The dataset captures key propagation characteristics, including path loss, shadowing, and multipath effects. Since MOCSID is intended as a reference for the development and validation of channel charting algorithms, we put particular emphasis on the spatial consistency of the synthetic data. With this dataset, we aim to foster progress in channel charting research by facilitating entry into the field and encouraging reproducibility, collaboration, and benchmarking within the community. MOCSID was generated using the NVIDIA Sionna ray tracing tool. MOCSID is publicly released on Zenodo.
+
+.. made-with-sionna::
+    :title: End-to-End Human Pose Reconstruction from Wearable Sensors for 6G Extended Reality Systems
+    :authors: Nguyen Quang Hieu, Dinh Thai Hoang, Diep N. Nguyen, Mohammad Abu Alsheikh, Carlos C. N. Kuhn, Yibeltal F. Alem, and Ibrahim Radwan
+    :year: 2025
+    :version: 0.19
+    :link_arxiv: https://arxiv.org/abs/2503.04860
+    :link_github: https://github.com/TheOpenSI/imu2pose-sionna 
+    :abstract: Full 3D human pose reconstruction is a critical enabler for extended reality (XR) applications in future sixth generation (6G) networks, supporting immersive interactions in gaming, virtual meetings, and remote collaboration. However, achieving accurate pose reconstruction over wireless networks remains challenging due to channel impairments, bit errors, and quantization effects. Existing approaches often assume error-free transmission in indoor settings, limiting their applicability to real-world scenarios. To address these challenges, we propose a novel deep learning-based framework for human pose reconstruction over orthogonal frequency-division multiplexing (OFDM) systems. The framework introduces a two-stage deep learning receiver: the first stage jointly estimates the wireless channel and decodes OFDM symbols, and the second stage maps the received sensor signals to full 3D body poses. Simulation results demonstrate that the proposed neural receiver reduces bit error rate (BER), thus gaining a 5 dB gap at 10−4 BER, compared to the baseline method that employs separate signal detection steps, i.e., least squares channel estimation and linear minimum mean square error equalization. Additionally, our empirical findings show that 8-bit quantization is sufficient for accurate pose reconstruction, achieving a mean squared error of 5×10−4 for reconstructed sensor signals, and reducing joint angular error by 37\% for the reconstructed human poses compared to the baseline.
+
+.. made-with-sionna::
+    :title: CISSIR: Beam Codebooks with Self-Interference Reduction Guarantees for Integrated Sensing and Communication Beyond 5G
+    :authors: Rodrigo Hernangómez, Jochen Fink, Renato L. G. Cavalcante, Sławomir Stańczak
+    :year: 2025
+    :version: 0.17
+    :link_arxiv: https://arxiv.org/abs/2502.10371
+    :link_github: https://github.com/rodrihgh/cissir
+    :abstract: We propose a beam codebook design to reduce self-interference (SI) in integrated sensing and communication (ISAC) systems. Our optimization methods, which can be applied to both tapered beamforming and phased arrays, adapt the codebooks to the SI channel such that a certain SI level is achieved. Furthermore, we derive an upper bound on the quantization noise in terms of the achieved SI level, which provides guidelines to pose the optimization problem in order to obtain performance guarantees for sensing. By selecting standard reference codebooks in our simulations, we show substantially improved sensing quality with little impact on 5G-NR communication. Our proposed method is not only less dependent on hyperparameters than other approaches in the literature, but it can also reduce SI further, and thus deliver better sensing and communication performance.
+
+.. made-with-sionna::
+    :title: Safehaul: Risk-Averse Learning for Reliable mmWave Self-Backhauling in 6G Networks
+    :authors: Amir Ashtari Gargari, Andrea Ortiz, Matteo Pagin, Anja Klein, Matthias Hollick, Michele Zorzi, Arash Asadi
+    :year: 2023
+    :version: 0.19.1
+    :link_arxiv: https://arxiv.org/abs/2301.03201
+    :link_github: https://github.com/TUDA-wise/safehaul_infocom2023
+    :abstract: Wireless backhauling at millimeter-wave frequencies (mmWave) in static scenarios is a well-established practice in cellular networks. However, highly directional and adaptive beamforming in today’s mmWave systems have opened new possibilities for self-backhauling. Tapping into this potential, 3GPP has standardized Integrated Access and Backhaul (IAB) allowing the same base station to serve both access and backhaul traffic. Although much more cost-effective and flexible, resource allocation and path selection in IAB mmWave networks is a formidable task. To date, prior works have addressed this challenge through a plethora of classic optimization and learning methods, generally optimizing a Key Performance Indicator (KPI) such as throughput, latency, and fairness, and little attention has been paid to the reliability of the KPI. We propose Safehaul, a risk-averse learning-based solution for IAB mmWave networks. In addition to optimizing average performance, Safehaul ensures reliability by minimizing the losses in the tail of the performance distribution. We develop a novel simulator and show via extensive simulations that Safehaul not only reduces the latency by up to 43.2% compared to the benchmarks, but also exhibits significantly more reliable performance, e.g., 71.4% less variance in achieved latency.
+
+
+.. made-with-sionna::
+    :title: Advancing Spectrum Anomaly Detection through Digital Twins
+    :authors: Anton Schösser, Friedrich Burmeister, Philipp Schulz, Mohd Danish Khursheed, Sinuo Ma, Gerhard Fettweis
+    :year: 2024
+    :version: 0.15.1
+    :link_arxiv: https://www.techrxiv.org/users/775914/articles/883996-advancing-spectrum-anomaly-detection-through-digital-twins
+    :link_github: https://github.com/akdd11/advancing-spectrum-anomaly-detection
+    :abstract: 6th generation (6G) cellular networks are expected to enable various safety-critical use cases, e.g., in the industrial domain, which require flawless operation of the network. Thus, resilience is one of the key requirements for 6G. A particularly critical point is that 6G, as any other wireless technology, is based on the open radio medium, making it susceptible to interference. Especially intentional interference, i.e., jamming, can severely degrade the network operability. Therefore, a new approach for detecting anomalies in the radio spectrum using a digital twin (DT) of the radio environment is presented in this work. This allows the integration of contextual awareness in the anomaly detection process and is thereby superior to state-of-the-art methods  for spectrum anomaly detection. We propose a suitable system architecture and discuss the tasks of machine learning (ML) therein, particularly for reducing the computational complexity and to detect anomalies in an unsupervised manner. The feasibility of the approach is demonstrated by ray tracing simulations. The results indicate a strong detection capability in case of an accurate DT and thereby illustrate the potential of DTs to enhance monitoring of  wireless networks in the future.
+
+.. made-with-sionna::
+    :title: Physically Consistent RIS: From Reradiation Mode Optimization to Practical Realization
+    :authors: Javad Shabanpour, Constantin Simovski, Giovanni Geraci
+    :year: 2024
+    :version: 0.18
+    :link_arxiv: https://arxiv.org/abs/2409.17738
+    :abstract: We propose a practical framework for designing a physically consistent reconfigurable intelligent surface (RIS) to overcome the inefficiency of the conventional phase gradient approach. For a section of Cape Town and across three different coverage enhancement scenarios, we optimize the amplitude of the RIS reradiation modes using Sionna ray tracing and a gradient-based learning technique. We then determine the required RIS surface/sheet impedance given the desired amplitudes for the reradiation modes, design the corresponding unitcells, and validate the performance through full-wave numerical simulations using CST Microwave Studio. We further validate our approach by fabricating a RIS using the parallel plate waveguide technique and conducting experimental measurements that align with our theoretical predictions.
+
+.. made-with-sionna::
+    :title: Design of a Standard-Compliant Real-Time Neural Receiver for 5G NR
+    :authors: Reinhard Wiesmayr, Sebastian Cammerer, Fayçal Aït Aoudia, Jakob Hoydis, Jakub Zakrzewski, Alexander Keller
+    :year: September 2024
+    :version: 0.18
+    :link_arxiv: https://arxiv.org/abs/2409.02912
+    :link_github: https://github.com/NVlabs/neural_rx
+    :abstract: We detail the steps required to deploy a multi-user multiple-input multiple-output (MU-MIMO) neural receiver (NRX) in an actual cellular communication system. This raises several exciting research challenges, including the need for real-time inference and compatibility with the 5G NR standard. As the network configuration in a practical setup can change dynamically within milliseconds, we propose an adaptive NRX architecture capable of supporting dynamic modulation and coding scheme (MCS) configurations without the need for any re-training and without additional inference cost. We optimize the latency of the neural network (NN) architecture to achieve inference times of less than 1ms on an NVIDIA A100 GPU using the TensorRT inference library. These latency constraints effectively limit the size of the NN and we quantify the resulting signal-to-noise ratio (SNR) degradation as less than 0.7 dB when compared to a preliminary non-real-time NRX architecture. Finally, we explore the potential for site-specific adaptation of the receiver by investigating the required size of the training dataset and the number of fine-tuning iterations to optimize the NRX for specific radio environments using a ray tracing-based channel model. The resulting NRX is ready for deployment in a real-time 5G NR system and the source code including the TensorRT experiments is available online.
 
 .. made-with-sionna::
     :title: BostonTwin: the Boston Digital Twin for Ray-Tracing in 6G Networks

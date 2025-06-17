@@ -1,30 +1,17 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-from numpy.lib.npyio import load
-
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0#
+import os
 import unittest
 import pytest  # required for filter warnings
 import numpy as np
 import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-print('Number of GPUs available :', len(gpus))
-if gpus:
-    gpu_num = 0 # Number of the GPU to be used
-    try:
-        tf.config.set_visible_devices(gpus[gpu_num], 'GPU')
-        print('Only GPU number', gpu_num, 'used.')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
-    except RuntimeError as e:
-        print(e)
-from sionna.fec.utils import bin2int_tf, j_fun, j_fun_inv, j_fun_tf, j_fun_inv_tf, GaussianPriorSource, llr2mi, bin2int, int2bin, int2bin_tf, alist2mat, load_alist, gm2pcm, pcm2gm, verify_gm_pcm, make_systematic, load_parity_check_examples, generate_reg_ldpc, int_mod_2
-from sionna.utils import log2, log10
+from sionna.phy.fec.utils import bin2int_tf, j_fun, j_fun_inv, GaussianPriorSource, llr2mi, bin2int, int2bin, int2bin_tf, alist2mat, load_alist, gm2pcm, pcm2gm, verify_gm_pcm, make_systematic, load_parity_check_examples, generate_reg_ldpc, int_mod_2
+from sionna.phy.utils import log2, log10
+from sionna.phy import config
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+test_dir = os.path.abspath(os.path.join(current_dir, os.pardir, os.pardir))
 
 class TestFECUtils(unittest.TestCase):
     """Test FEC utilities."""
@@ -45,21 +32,13 @@ class TestFECUtils(unittest.TestCase):
         y_tf = log10(tf.cast(x, dtype=tf.float32))
         self.assertTrue(np.allclose(y_np, y_tf.numpy()))
 
-    def test_j_fun_np(self):
-        """Test that J(inv_j(x))==x for numpy implementation."""
-
-        x = np.arange(0.01,20,0.1)
-        y = j_fun(x)
-        z = j_fun_inv(y)
-        self.assertTrue(np.allclose(x, z, rtol=0.001))
-
-    def test_j_fun_tf(self):
+    def test_j_fun(self):
         """Test that J(inv_j(x))==x for Tensorflow implementation."""
 
         x = np.arange(0.01,20,0.1)
         x_tf = tf.constant(x, dtype=tf.float32)
-        y = j_fun_tf(x_tf)
-        z = j_fun_inv_tf(y)
+        y = j_fun(x_tf)
+        z = j_fun_inv(y)
         self.assertTrue(np.allclose(x, z.numpy(), rtol=0.001))
 
     def test_gaussian_prior(self):
@@ -68,14 +47,14 @@ class TestFECUtils(unittest.TestCase):
         Indirectly, also validates llr2mi function."""
 
         num_samples =  [100000]
-        s = GaussianPriorSource(specified_by_mi=True)
+        s = GaussianPriorSource()
         mi = np.arange(0.01, 0.99, 0.01)
         ia_hat = np.zeros_like(mi)
         for i, mii in enumerate(mi):
-            x = s([num_samples, mii])
+            x = s(num_samples, mi=mii)
             ia_hat[i] = llr2mi(x).numpy()
         self.assertTrue(np.allclose(mi, ia_hat, atol=1e-2)) # this is a
-        # montecarlo sim and Gaussian approx; we can set the tolerance
+        # Monte Carlo sim and Gaussian approx; we can set the tolerance
         # relatively high
 
     def test_gaussian_prior_sigma(self):
@@ -88,7 +67,7 @@ class TestFECUtils(unittest.TestCase):
         """
 
         num_samples =  [100000]
-        s = GaussianPriorSource(specified_by_mi=False)
+        s = GaussianPriorSource()
         sigma_ch= np.arange(0.3, 5, 0.1)
 
         sigma_target = np.sqrt(4 * sigma_ch**(-2))
@@ -97,14 +76,14 @@ class TestFECUtils(unittest.TestCase):
         sigma_hat = np.zeros_like(sigma_ch)
         mu_hat = np.zeros_like(sigma_ch)
 
-        for i, no in enumerate((sigma_ch)):
-            x = s([num_samples, no**2])
+        for i, sigma in enumerate((sigma_ch)):
+            x = s(num_samples, no=sigma**2)
             sigma_hat[i] = tf.sqrt(tf.reduce_mean(
                                         tf.pow(x - tf.reduce_mean(x),
                                                2))).numpy()
             mu_hat[i] = tf.reduce_mean(x).numpy()
 
-        # this is a montecarlo sim and approximated; we can set the tolerance
+        # this is a Monte Carlo sim and approximated; we can set the tolerance
         # relatively high
         self.assertTrue(np.allclose(sigma_target, sigma_hat, atol=1e-1))
         # -1.* due to logits vs llrs
@@ -115,33 +94,17 @@ class TestFECUtils(unittest.TestCase):
         """
 
         def run_graph(num_samples):
-            x = s([num_samples, 1])
+            x = s(num_samples, no=1.)
             return x
 
         def run_graph_xla(num_samples):
-            x = s([num_samples, 1.])
+            x = s(num_samples, no=1.)
             return x
 
         num_samples = [100000]
         s = GaussianPriorSource()
         x = run_graph(num_samples)
         x = run_graph_xla(num_samples)
-
-    def test_keras(self):
-        """Test that Keras model of GaussianPriorSource can be compiled."""
-
-        inputs = tf.keras.Input(shape=(1), dtype=tf.float32)
-        x = GaussianPriorSource()([tf.shape(inputs), 0.])
-        model = tf.keras.Model(inputs=inputs, outputs=x)
-
-        # test that output batch dim is none
-        self.assertTrue(model.output_shape[0] is None)
-
-        # test that model can be called
-        model(100)
-        # call twice to see that bs can change
-        model(101)
-        model.summary()
 
     def test_bin2int(self):
         """Test bin2int function against pre-defined cases."""
@@ -250,7 +213,7 @@ class TestFECUtils(unittest.TestCase):
         """Test to load example alist files.
         """
 
-        path = "codes/ldpc/wimax_576_0.5.alist"
+        path = test_dir + "/codes/ldpc/wimax_576_0.5.alist"
 
         # load file
         alist = load_alist(path)
@@ -411,8 +374,6 @@ class TestFECUtils(unittest.TestCase):
     def test_generate_reg_ldpc(self):
         """Test LDPC generator function."""
 
-        # fix seed of rng
-        np.random.seed(1337)
         # v,c,n
         params = [[3,6,100],
                   [1,10,1000],
@@ -440,17 +401,18 @@ class TestFECUtils(unittest.TestCase):
         s = [10, 20, 30]
 
         # int inputs
-        x = tf.random.uniform(s, minval=-2**30, maxval=2**30, dtype=tf.int32)
+        x = config.tf_rng.uniform(s, minval=-2**30, maxval=2**30, dtype=tf.int32)
 
         y = int_mod_2(x)
         y_ref = tf.math.mod(tf.cast(x, tf.float64), 2.)
         self.assertTrue(np.array_equal(y.numpy(), y_ref.numpy()))
 
         # float inputs
-        x = tf.random.uniform(s, minval=-1000, maxval=1000, dtype=tf.float32)
+        x = config.tf_rng.uniform(s, minval=-1000, maxval=1000, dtype=tf.float32)
 
         y = int_mod_2(x)
         # model implicit cast
-        x_f = tf.sign(x) * tf.math.floor(tf.abs(x))
-        y_ref = tf.math.mod(tf.math.ceil(x_f), 2.)
+        x_ = tf.math.abs(tf.math.round(x))
+        # tf.math.mod seems deprecated
+        y_ref = tf.math.floormod(x_, 2)
         self.assertTrue(np.array_equal(y.numpy(), y_ref.numpy()))
