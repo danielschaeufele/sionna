@@ -3,20 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-try:
-    import sionna
-except ImportError as e:
-    import sys
-    sys.path.append("../")
-
 from sionna.phy.ofdm import OFDMModulator, OFDMDemodulator
 from sionna.phy.channel import PowerAmplifierNonlinearity
 from sionna.phy.mapping import QAMSource
+from sionna.phy import config
 
 import pytest
-import unittest
 import numpy as np
-import tensorflow as tf
 
 
 def memoryless_polynomial_nonlinearity(data, backoff_db, model_coefficients):
@@ -31,9 +24,9 @@ def memoryless_polynomial_nonlinearity(data, backoff_db, model_coefficients):
     return result
 
 
-class TestPowerAmplifierNonlinearity(unittest.TestCase):
+class TestPowerAmplifierNonlinearity:
     def test_against_reference(self):
-        tf.random.set_seed(1)
+        config.seed = 1
         fft_size = 1024
         batch_size = 10
         num_ofdm_symbols = 14
@@ -60,7 +53,7 @@ class TestPowerAmplifierNonlinearity(unittest.TestCase):
         for power_backoff_db in [0, 2, 4, 10, 20]:
             for model in ['GaAs_2GHz', 'GaN_2GHz', 'CMOS_28GHz', 'GaN_28GHz', 'custom']:
                 # print(f"Testing {model} with {power_backoff_db}dB power backoff")
-                x_gt = memoryless_polynomial_nonlinearity(x_time.numpy(), power_backoff_db,
+                x_gt = memoryless_polynomial_nonlinearity(x_time.cpu().numpy(), power_backoff_db,
                                                           model_coefficients[model])
 
                 if model == 'custom':
@@ -68,4 +61,4 @@ class TestPowerAmplifierNonlinearity(unittest.TestCase):
                 pa_nonlin = PowerAmplifierNonlinearity(power_backoff_db, model)
                 x_test = pa_nonlin(x_time)
 
-                np.testing.assert_array_almost_equal(x_gt, x_test, decimal=3)
+                np.testing.assert_array_almost_equal(x_gt, x_test.cpu().numpy(), decimal=3)

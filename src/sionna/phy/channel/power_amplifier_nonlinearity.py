@@ -4,7 +4,8 @@
 #
 """Class definition for power amplifier nonlinearities"""
 
-import tensorflow as tf
+import torch
+
 from sionna.phy import Block
 
 
@@ -72,20 +73,20 @@ class PowerAmplifierNonlinearity(Block):
 
     def call(self, x):
         # Normalize input power to 1
-        scaling = tf.cast(tf.math.sqrt(tf.reduce_mean(tf.math.abs(x) ** 2)),
-                     x.dtype)
+        scaling = torch.sqrt(torch.mean(torch.abs(x) ** 2)).to(x.dtype)
         # Apply power backoff
         scaling *= 10. ** (self._power_backoff_db / 20)
         x /= scaling
         # Clip samples with magnitude > 1
-        x = tf.where(tf.math.abs(x) > 1, x / tf.cast(tf.math.abs(x),
-                                                     x.dtype), x)
+        x_abs = torch.abs(x)
+        x = torch.where(x_abs > 1, x / x_abs, x)
+        x_abs = torch.abs(x)
 
         # Apply nonlinearity
-        x_nonlinear = tf.zeros_like(x)
+        x_nonlinear = torch.zeros_like(x)
         for k, coeff in enumerate(self._model_coefficients):
-            x_nonlinear += coeff * x * tf.cast(tf.math.pow(tf.math.abs(x),
-                                                   2 * k), x.dtype)
+            coeff = torch.as_tensor(coeff, dtype=x.dtype, device=x.device)
+            x_nonlinear += coeff * x * torch.pow(x_abs, 2 * k)
 
         # Revert scaling
         x_nonlinear *= scaling

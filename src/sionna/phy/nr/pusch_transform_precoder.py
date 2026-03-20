@@ -1,10 +1,12 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-"""Class definitions for PUSCH transform precoder and deprecoder"""
+"""PUSCH transform precoder and deprecoder."""
 
-import tensorflow as tf
+from typing import Optional, Tuple
+import torch
+
 from sionna.phy import Block
 from sionna.phy.signal import fft, ifft
 
@@ -19,96 +21,102 @@ def _check_largest_prime_factor_not_larger_then_5(n):
 
 class PUSCHTransformPrecoder(Block):
     r"""
-    Performs transform precoding of layer mapped symbols as defined in
-    [3GPP38211]_ Sec. 6.3.1.4.
+    This block performs transform precoding of layer mapped symbols as defined
+    in :cite:p:`3GPP38211` Sec. 6.3.1.4.
     The input will be reshaped into blocks of size ``num_subcarriers`` to which
     the FFT will be applied individually.
-    The class inherits from the Keras layer class and can be used as layer in a
-    Keras model.
-    Parameters
-    ----------
-        num_subcarriers: int
-            Number of subcarriers. The largest prime factor must not be larger
-            than 5.
-        dtype : One of [tf.complex64, tf.complex128]
-            Dtype of inputs and outputs. Defaults to tf.complex64.
-    Input
-    -----
-        inputs: [...,n], tf.complex
+
+    :param num_subcarriers: Number of subcarriers. The largest prime factor must
+        not be larger than 5.
+    :param precision: Precision used for internal calculations and outputs.
+        If set to `None`, :attr:`~sionna.phy.config.Config.precision` is used.
+    :param device: Device for computation. If `None`, the default device is
+        used.
+
+    :input y: [...,n], `torch.complex`.
             Tensor containing the sequence of symbols to be transform precoded.
-    Output
-    ------
-        : [...,n], tf.complex
+    :output: [...,n], `torch.complex`.
             Tensor containing the sequence of symbols that have been transform
             precoded.
     """
 
-    def __init__(self, num_subcarriers, precision=None, **kwargs):
-        super().__init__(precision=precision, **kwargs)
+    def __init__(
+            self,
+            num_subcarriers: int,
+            precision: Optional[str] = None,
+            device: Optional[str] = None,
+            **kwargs
+        ):
+        super().__init__(precision=precision, device=device, **kwargs)
         _check_largest_prime_factor_not_larger_then_5(num_subcarriers)
         self._num_subcarriers = num_subcarriers
 
-    def call(self, y):
-        orig_shape = tf.shape(y)
-        y_reshaped = tf.reshape(y, [-1, self._num_subcarriers])
-        y_transformed = fft(y_reshaped, precision=self._precision)
-        y_result = tf.reshape(y_transformed, orig_shape)
-        return y_result
+    def call(self, y: torch.Tensor) -> torch.Tensor:
+        y_reshaped = y.reshape(-1, self._num_subcarriers)
+        y_transformed = fft(y_reshaped, precision=self.precision)
+        return y_transformed.reshape(y.shape)
 
 
 class PUSCHTransformDeprecoder(Block):
     r"""
     Performs transform deprecoding of layer mapped symbols as defined in
-    [3GPP38211]_ Sec. 6.3.1.4.
+    :cite:p:`3GPP38211` Sec. 6.3.1.4.
     The input will be reshaped into blocks of size ``num_subcarriers`` to which
     the IFFT will be applied individually.
-    The class inherits from the Keras layer class and can be used as layer in a
-    Keras model.
-    Parameters
-    ----------
-        num_subcarriers: int
-            Number of subcarriers. The largest prime factor must not be larger
-            than 5.
-        dtype : One of [tf.complex64, tf.complex128]
-            Dtype of inputs and outputs. Defaults to tf.complex64.
-    Input
-    -----
-        y: [...,n,1], tf.complex
+    
+    :param num_subcarriers: Number of subcarriers. The largest prime factor must
+        not be larger than 5.
+    :param precision: Precision used for internal calculations and outputs.
+        If set to `None`, :attr:`~sionna.phy.config.Config.precision` is used.
+    :param device: Device for computation. If `None`, the default device is
+        used.
+
+    :input y: [...,n,1], `torch.complex`.
             Tensor containing the sequence of symbols after transform precoding.
-        no_eff: [...,n,1], tf.complex
-            Tensor containing the noise variance of symbols after transform precoding.
-        return_cov: bool
-            Indicates whether to return the covariance matrix (True) or the diagonal of covariance matrix (False, default).
-    Output
-    ------
-        y : [...,n,1], tf.complex
+    :input no_eff: [...,n,1], `torch.complex`.
+            Tensor containing the noise variance of symbols after transform
+            precoding.
+    :input return_cov: bool
+            Indicates whether to return the covariance matrix (True) or the
+            diagonal of covariance matrix (False, default).
+        
+    :output y: [...,n,1], `torch.complex`
             Tensor containing the sequence of symbols before transform precoding.
-        no_eff : [...,n,1] or [...,n,n,1], tf.complex
-            Tensor containing the noise variance of symbols before transform precoding.
+    :output no_eff: [...,n,1] or [...,n,n,1], `torch.complex`
+            Tensor containing the noise variance or covariance matrix of
+            symbols before transform precoding.
     """
 
-    def __init__(self, num_subcarriers, precision=None, **kwargs):
-        super().__init__(precision=precision, **kwargs)
+    def __init__(
+            self,
+            num_subcarriers: int,
+            precision: Optional[str] = None,
+            device: Optional[str] = None,
+            **kwargs
+        ):
+        super().__init__(precision=precision, device=device, **kwargs)
         _check_largest_prime_factor_not_larger_then_5(num_subcarriers)
         self._num_subcarriers = num_subcarriers
 
-    def call(self, y, no_eff, return_cov=False):
-        orig_shape = tf.shape(y)
-        y_reshaped = tf.reshape(y, [-1, self._num_subcarriers])
-        y_transformed = ifft(y_reshaped, precision=self._precision)
-        y_result = tf.reshape(y_transformed, orig_shape)
+    def call(
+            self, y: torch.Tensor,
+            no_eff: torch.Tensor,
+            return_cov: bool = False
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+        y_reshaped = y.reshape(-1, self._num_subcarriers)
+        y_transformed = ifft(y_reshaped, precision=self.precision)
+        y_result = y_transformed.reshape(y.shape)
 
         if return_cov:
-            no_eff_reshaped = tf.reshape(no_eff, [-1, self._num_subcarriers])
-            no_eff_diag = tf.linalg.diag(no_eff_reshaped)
+            no_eff_reshaped = no_eff.reshape(-1, self._num_subcarriers)
+            no_eff_diag = torch.diag_embed(no_eff_reshaped)
             no_eff = fft(
-                ifft(no_eff_diag, precision=self._precision, axis=-2),
-                precision=self._precision,
+                ifft(no_eff_diag, precision=self.precision, axis=-2),
+                precision=self.precision,
                 axis=-1,
             )
-            no_shape = tf.concat([orig_shape[:-2], [self._num_subcarriers, self._num_subcarriers]], 0)
-            no_eff = tf.reshape(no_eff, no_shape)
+            no_eff = no_eff.reshape(*y.shape[:-2], self._num_subcarriers, self._num_subcarriers)
         else:
             # Noise power is evenly spread over all subcarriers by IDFT transform
-            no_eff = tf.ones(orig_shape) * tf.reduce_mean(no_eff, axis=-2, keepdims=True)
+            no_eff = torch.ones_like(no_eff) * no_eff.mean(dim=-2, keepdim=True)
         return y_result, no_eff
