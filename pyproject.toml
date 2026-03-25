@@ -81,4 +81,5 @@ documentation = "https://nvlabs.github.io/sionna/"
 issues = "https://github.com/nvlabs/sionna/issues"
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 testpaths = ["test/unit"]

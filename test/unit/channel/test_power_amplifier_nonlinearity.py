@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-from sionna.phy.ofdm import OFDMModulator, OFDMDemodulator
-from sionna.phy.channel import PowerAmplifierNonlinearity
+from sionna.phy.ofdm import OFDMModulator
+from sionna.phy.channel import PowerAmplifierNonlinearity, FreqDomainPowerAmplifierNonlinearity
 from sionna.phy.mapping import QAMSource
 from sionna.phy import config
 
@@ -12,37 +12,45 @@ import pytest
 import numpy as np
 
 
-def memoryless_polynomial_nonlinearity(data, backoff_db, model_coefficients):
+def polynomial_nonlinearity(data, backoff_db, model_coefficients):
     normalization_factor = np.sqrt(np.mean(np.abs(data)**2))
     data *= 10. ** (-backoff_db / 20) / normalization_factor
     clip_mask = np.abs(data) > 1
     data[clip_mask] = data[clip_mask] / np.abs(data[clip_mask])
     result = np.zeros_like(data)
-    for k, coeff in enumerate(model_coefficients):
-        result += coeff * data * np.power(np.abs(data), 2 * k)
+    for l, m, coeffs in model_coefficients:
+        signal_term = np.roll(data, l, axis=-1)
+        envelope_term = np.roll(np.abs(data), l + m, axis=-1)
+        for k, coeff in enumerate(coeffs):
+            result += coeff * signal_term * np.power(envelope_term, 2 * k)
     result *= 10. ** (backoff_db / 20) * normalization_factor
     return result
 
 
+def freq_domain_polynomial_nonlinearity(data, backoff_db, model_coefficients, fft_size, zero_pads):
+    if zero_pads is not None:
+        data = np.pad(data, {-1: zero_pads})
+    data = np.fft.ifftshift(data, axes=-1)
+    data_time = np.fft.ifft(data, axis=-1) * np.sqrt(fft_size)
+    data_time_nl = polynomial_nonlinearity(data_time, backoff_db, model_coefficients)
+    data_freq_nl = np.fft.fft(data_time_nl, axis=-1) / np.sqrt(fft_size)
+    data_freq_nl = np.fft.fftshift(data_freq_nl, axes=-1)
+    if zero_pads is not None:
+        data_freq_nl = data_freq_nl[..., zero_pads : -zero_pads]
+    return data_freq_nl
+
+
 class TestPowerAmplifierNonlinearity:
-    def test_against_reference(self):
+    def test_time_domain_power_amplifier_nonlinearity(self, subtests):
         config.seed = 1
         fft_size = 1024
         batch_size = 10
         num_ofdm_symbols = 14
 
-        model_coefficients = {
-            'GaAs_2GHz': [-0.618347 - 0.785905j, 2.0831 - 1.69506j, -14.7229 + 16.8335j, 61.6423 - 76.9171j,
-                          -145.139 + 184.765j, 190.61 - 239.371j, -130.184 + 158.957j, 36.0047 - 42.5192j],
-            'GaN_2GHz': [0.999952 - 0.00981788j, -0.0618171 + 0.118845j, -1.69917 - 0.464933j, 3.27962 + 0.829737j,
-                         -1.80821 - 0.454331j],
-            'CMOS_28GHz': [0.491576 + 0.870835j, -1.26213 + 0.242689j, 7.11693 + 5.14105j, -30.7048 - 53.4924j,
-                           73.8814 + 169.146j, -96.7955 - 253.635j, 65.0665 + 185.434j, -17.5838 - 53.1786j],
-            'GaN_28GHz': [-0.334697 - 0.942326j, 0.89015 - 0.72633j, -2.58056 + 4.81215j, 4.81548 - 9.54837j,
-                          -4.41452 + 8.63164j, 1.54271 - 2.94034j],
-            'custom': [1.07 - 0.2j, -0.95 - 0.25j, 21.84 + 13.71j, -150.68 - 59.45j, 468.34 + 111.04j,
-                       -798.37 - 89.73j, 775 + 3.05j, -402.67 + 38.38j, 87.02 - 16.45j]
-        }
+        custom_model_coefficients = [
+            (0, 0, [1.07 - 0.2j, -0.95 - 0.25j, 21.84 + 13.71j, -150.68 - 59.45j,
+                    468.34 + 111.04j, -798.37 - 89.73j, 775 + 3.05j,
+                    -402.67 + 38.38j, 87.02 - 16.45j])]
 
         qam_source = QAMSource(4)
         modulator = OFDMModulator()
@@ -51,14 +59,62 @@ class TestPowerAmplifierNonlinearity:
         x_time = modulator(x)
 
         for power_backoff_db in [0, 2, 4, 10, 20]:
-            for model in ['GaAs_2GHz', 'GaN_2GHz', 'CMOS_28GHz', 'GaN_28GHz', 'custom']:
-                # print(f"Testing {model} with {power_backoff_db}dB power backoff")
-                x_gt = memoryless_polynomial_nonlinearity(x_time.cpu().numpy(), power_backoff_db,
-                                                          model_coefficients[model])
+            for model in ['GaAs_2GHz', 'GaN_2GHz', 'CMOS_28GHz', 'GaN_28GHz', 'GaAs_2GHz_GMP',
+                          'GaN_2GHz_GMP', 'CMOS_28GHz_GMP', 'GaN_28GHz_GMP', 'custom']:
+                with subtests.test(msg=f"{model} with {power_backoff_db}dB power backoff"):
+                    if model == 'custom':
+                        model = custom_model_coefficients
+                    pa_nonlin = PowerAmplifierNonlinearity(power_backoff_db, model)
+                    x_test = pa_nonlin(x_time.clone())
+                    x_gt = polynomial_nonlinearity(x_time.cpu().numpy(), power_backoff_db,
+                                                pa_nonlin._model_coefficients)
 
-                if model == 'custom':
-                    model = model_coefficients[model]
-                pa_nonlin = PowerAmplifierNonlinearity(power_backoff_db, model)
-                x_test = pa_nonlin(x_time)
+                    np.testing.assert_array_almost_equal(x_test.cpu().numpy(), x_gt, decimal=3)
 
-                np.testing.assert_array_almost_equal(x_gt, x_test.cpu().numpy(), decimal=3)
+    def test_freq_domain_power_amplifier_nonlinearity(self, subtests):
+        config.seed = 1
+        fft_size = 1024
+        batch_size = 10
+        num_ofdm_symbols = 14
+        sample_rate = 122.88e6
+
+        custom_model_coefficients = [
+            (0, 0, [1.07 - 0.2j, -0.95 - 0.25j, 21.84 + 13.71j, -150.68 - 59.45j,
+                    468.34 + 111.04j, -798.37 - 89.73j, 775 + 3.05j,
+                    -402.67 + 38.38j, 87.02 - 16.45j])]
+
+        qam_source = QAMSource(4)
+        x = qam_source([batch_size, num_ofdm_symbols, fft_size])
+
+        for power_backoff_db in [0, 4, 10]:
+            for model in ['GaAs_2GHz', 'GaN_28GHz', 'GaN_2GHz_GMP', 'CMOS_28GHz_GMP', 'custom']:
+                with subtests.test(msg=f"{model} with {power_backoff_db}dB power backoff"):
+                    if model == 'custom':
+                        model = custom_model_coefficients
+                        custom_sample_rate = 200e6
+                    else:
+                        custom_sample_rate = None
+                    pa_nonlin = PowerAmplifierNonlinearity(
+                        power_backoff_db, model, sample_rate=custom_sample_rate)
+                    freq_domain_nonlin = FreqDomainPowerAmplifierNonlinearity(
+                        pa_nonlin, fft_size, sample_rate=sample_rate)
+
+                    if pa_nonlin._sample_rate is not None:
+                        upsampling_factor = round(pa_nonlin._sample_rate / sample_rate)
+                        upsampled_fft_size = fft_size * upsampling_factor
+                        zero_pads = (upsampling_factor - 1) * fft_size // 2
+                        assert upsampling_factor == freq_domain_nonlin._upsampling_factor
+                        assert upsampled_fft_size == freq_domain_nonlin._upsampled_fft_size
+                        assert zero_pads == freq_domain_nonlin._zero_pads
+                    else:
+                        zero_pads = None
+
+                    x_gt = freq_domain_polynomial_nonlinearity(
+                        x.cpu().numpy(),
+                        power_backoff_db,
+                        pa_nonlin._model_coefficients,
+                        fft_size,
+                        zero_pads
+                    )
+                    x_test = freq_domain_nonlin(x)
+                    np.testing.assert_array_almost_equal(x_test.cpu().numpy(), x_gt, decimal=3)

@@ -28,6 +28,9 @@ from .generate_time_channel import GenerateTimeChannel
 from .apply_time_channel import ApplyTimeChannel
 from .rayleigh_block_fading import RayleighBlockFading
 from .spatial_correlation import KroneckerModel, PerColumnModel, SpatialCorrelation
-from .power_amplifier_nonlinearity import PowerAmplifierNonlinearity
+from .power_amplifier_nonlinearity import (
+    PowerAmplifierNonlinearity,
+    FreqDomainPowerAmplifierNonlinearity
+)
 from .utils import *
 from . import tr38901
