@@ -8,13 +8,10 @@ import functools
 from typing import List, Optional, Tuple, Union
 import numpy as np
 
+from sionna._validation import check_instance, check_sequence_of
 from sionna.phy import nr
 from .config import Config
-from .utils import (
-    generate_prng_seq,
-    generate_low_papr_seq_type_1,
-    calculate_tb_size
-)
+from .utils import generate_prng_seq, generate_low_papr_seq_type_1, calculate_tb_size
 
 
 __all__ = ["PUSCHConfig", "check_pusch_configs"]
@@ -455,7 +452,7 @@ class PUSCHConfig(Config):
                         n /= p
                 if n == 1:
                     return eff_prbs
-            assert False, "Num PRBs cannot be adjusted to meet prime factor constraints"
+            raise ValueError("Num PRBs cannot be adjusted to meet prime factor constraints")
 
         if self.transform_precoding:
             return adjust_prbs_to_prime_factor_constraints(self.num_resource_blocks)
@@ -554,7 +551,7 @@ class PUSCHConfig(Config):
 
         for l_bar in self.l_bar:
             for l_prime in self.l_prime:
-                sym = l_bar + l_prime
+                sym = self.l_ref + l_bar + l_prime
 
                 if self.transform_precoding:
                     if self.dmrs.n_sid is None:
@@ -575,7 +572,7 @@ class PUSCHConfig(Config):
                             else:  # config_type == 2
                                 k = 6 * n + k_prime + self.dmrs.deltas[j_ind]
 
-                            a_tilde[j_ind, k, self.l_ref + sym] = (
+                            a_tilde[j_ind, k, sym] = (
                                 r[2 * n + k_prime] *
                                 self.dmrs.w_f[k_prime][j_ind] *
                                 self.dmrs.w_t[l_prime][j_ind])
@@ -828,7 +825,7 @@ class PUSCHConfig(Config):
     def c_init(self, l: int) -> int:
         r"""Compute RNG initialization :math:`c_\text{init}` as in Section 6.4.1.1.1.1 :cite:p:`3GPPTS38211`.
 
-        :param l: OFDM symbol index relative to a reference :math:`l`.
+        :param l: OFDM symbol index within the slot.
         """
         num_symbols_per_slot = self.carrier.num_symbols_per_slot
         slot_number = self.carrier.slot_number
@@ -893,7 +890,17 @@ class PUSCHConfig(Config):
         else:
             if self.dmrs.additional_position >= 2:
                 raise ValueError(
-                    "dmrs.additional_position must be < 2 for this dmrs.length")
+                    "dmrs.additional_position must be < 2 for this dmrs.length"
+                )
+            if (
+                self.mapping_type == "A"
+                and self.l_d == 4
+                and self.dmrs.type_a_position != 2
+            ):
+                raise ValueError(
+                    "dmrs.type_a_position must be 2 for mapping type A, "
+                    "dmrs.length=2, and symbol_allocation length 4"
+                )
             if self.symbol_allocation[1] < 4:
                 raise ValueError("Symbol allocation too short")
             if self.mapping_type == "B" and self.symbol_allocation[1] < 5:
@@ -977,46 +984,131 @@ class PUSCHConfig(Config):
 def check_pusch_configs(pusch_configs: List[PUSCHConfig]) -> dict:
     """Validate a list of PUSCHConfig instances and extract common parameters.
 
-    :param pusch_configs: List of :class:`~sionna.phy.nr.PUSCHConfig` instances.
-    """
-    if not isinstance(pusch_configs, list):
-        raise TypeError(
-            "pusch_configs must be a list of PUSCHConfig instances")
+    The returned ``cyclic_prefix_length`` is a single sample count derived from
+    :attr:`~sionna.phy.nr.CarrierConfig.cyclic_prefix_length`. As documented
+    there, Sionna uses one scalar CP duration for the whole slot rather than
+    the per-symbol CP lengths of TS 38.211.
 
+    :param pusch_configs: List of :class:`~sionna.phy.nr.PUSCHConfig` instances.
+
+        All configurations must use the same carrier geometry, resource
+        allocation, coding, layer, precoding, and DMRS structure.
+        Transmitter-specific cell and scrambling identities, DMRS ports and
+        sequences, and precoding-matrix values may differ.
+    """
+    check_instance(
+        pusch_configs,
+        list,
+        name="pusch_configs",
+        message="pusch_configs must be a list of PUSCHConfig instances",
+    )
+    if not pusch_configs:
+        raise ValueError("pusch_configs must not be empty")
+
+    check_sequence_of(
+        pusch_configs,
+        PUSCHConfig,
+        name="pusch_configs",
+        sequence_type=list,
+        message="All elements must be instances of PUSCHConfig",
+    )
     for pusch_config in pusch_configs:
-        if not isinstance(pusch_config, PUSCHConfig):
-            raise TypeError(
-                "All elements must be instances of PUSCHConfig")
         pusch_config.check_config()
 
     pc = pusch_configs[0]
     pc.tb.transform_precoding = pc.transform_precoding
     carrier = pc.carrier
 
+    def scalar(value):
+        """Convert scalar NumPy and tensor values to Python scalars."""
+        if hasattr(value, "numel"):
+            if value.numel() != 1:
+                raise ValueError("Expected a scalar tensor value")
+            return value.item()
+        if isinstance(value, np.generic):
+            return value.item()
+        return value
+
+    common_parameters = [
+        ("num_layers", lambda c: c.num_layers),
+        ("num_antenna_ports", lambda c: c.num_antenna_ports),
+        ("precoding", lambda c: c.precoding),
+        ("transform_precoding", lambda c: c.transform_precoding),
+        ("mapping_type", lambda c: c.mapping_type),
+        ("symbol_allocation", lambda c: tuple(c.symbol_allocation)),
+        ("n_size_bwp", lambda c: c.n_size_bwp),
+        ("n_start_bwp", lambda c: c.n_start_bwp),
+        ("carrier.cyclic_prefix", lambda c: c.carrier.cyclic_prefix),
+        ("carrier.subcarrier_spacing", lambda c: c.carrier.subcarrier_spacing),
+        ("carrier.n_size_grid", lambda c: c.carrier.n_size_grid),
+        ("carrier.n_start_grid", lambda c: c.carrier.n_start_grid),
+        ("carrier.slot_number", lambda c: c.carrier.slot_number),
+        ("carrier.frame_number", lambda c: c.carrier.frame_number),
+        ("tb.mcs_table", lambda c: c.tb.mcs_table),
+        ("tb.mcs_index", lambda c: c.tb.mcs_index),
+        ("dmrs.config_type", lambda c: c.dmrs.config_type),
+    ]
+    if pc.mapping_type == "A":
+        common_parameters.append(
+            ("dmrs.type_a_position", lambda c: c.dmrs.type_a_position)
+        )
+    common_parameters += [
+        ("dmrs.length", lambda c: c.dmrs.length),
+        ("dmrs.additional_position", lambda c: c.dmrs.additional_position),
+        (
+            "dmrs.num_cdm_groups_without_data",
+            lambda c: c.dmrs.num_cdm_groups_without_data,
+        ),
+        ("num_resource_blocks", lambda c: c.num_resource_blocks),
+        ("num_subcarriers", lambda c: c.num_subcarriers),
+        ("num_ofdm_symbols", lambda c: c.l_d),
+        ("tb.num_bits_per_symbol", lambda c: scalar(c.tb.num_bits_per_symbol)),
+        ("tb.target_coderate", lambda c: scalar(c.tb.target_coderate)),
+        ("num_coded_bits", lambda c: c.num_coded_bits),
+        ("tb_size", lambda c: c.tb_size),
+        ("dmrs_mask", lambda c: c.dmrs_mask),
+    ]
+    expected_parameters = [
+        (name, accessor, accessor(pc)) for name, accessor in common_parameters
+    ]
+
+    for index, pusch_config in enumerate(pusch_configs[1:], start=1):
+        for name, accessor, expected in expected_parameters:
+            actual = accessor(pusch_config)
+            if isinstance(expected, np.ndarray):
+                matches = np.array_equal(actual, expected)
+            else:
+                matches = actual == expected
+            if not matches:
+                raise ValueError(
+                    f"pusch_configs[{index}].{name} must match "
+                    f"pusch_configs[0] ({actual!r} != {expected!r})"
+                )
+
     params = {
-        "num_bits_per_symbol": pc.tb.num_bits_per_symbol,
+        "num_bits_per_symbol": scalar(pc.tb.num_bits_per_symbol),
         "num_tx": len(pusch_configs),
         "num_layers": pc.num_layers,
         "num_subcarriers": pc.num_subcarriers,
-        "fft_size" : pc.fft_size,
+        "fft_size": pc.fft_size,
         "num_effective_subcarriers": pc.num_effective_subcarriers,
         "num_ofdm_symbols": pc.symbol_allocation[1],
         "subcarrier_spacing": pc.carrier.subcarrier_spacing * 1e3,
         "num_antenna_ports": pc.num_antenna_ports,
         "precoding": pc.precoding,
         "precoding_matrices": [],
-        "transform_precoding" : pc.transform_precoding,
+        "transform_precoding": pc.transform_precoding,
         "pusch_config": pc,
         "carrier_config": pc.carrier,
         "num_coded_bits": pc.num_coded_bits,
-        "target_coderate": pc.tb.target_coderate,
+        "target_coderate": scalar(pc.tb.target_coderate),
         "n_id": [],
         "n_rnti": [],
         "tb_size": pc.tb_size,
         "dmrs_length": pc.dmrs.length,
         "dmrs_additional_position": pc.dmrs.additional_position,
         "num_cdm_groups_without_data": pc.dmrs.num_cdm_groups_without_data,
-        "phase_correction_sequence" : pc.phase_correction_sequence,
+        "phase_correction_sequence": pc.phase_correction_sequence,
     }
     params["bandwidth"] = params["num_subcarriers"] * params["subcarrier_spacing"]
     params["cyclic_prefix_length"] = np.ceil(

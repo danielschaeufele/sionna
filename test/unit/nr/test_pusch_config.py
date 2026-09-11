@@ -28,6 +28,7 @@ class TestPUSCHConfig:
         assert config.num_layers == 1
         assert config.num_antenna_ports == 1
         assert config.symbol_allocation == [0, 14]
+        assert config.transform_precoding is False
 
     def test_custom_mapping_type(self):
         """Test configuration with custom mapping type."""
@@ -152,8 +153,8 @@ class TestPUSCHConfig:
         """Generate carrier signal for upconversion and compare phase shift at
         the start of each symbol with the generated phase correction sequence"""
         for subcarrier_spacing in [15, 30, 60, 120, 240]:
-            pusch_config = PUSCHConfig(subcarrier_spacing=subcarrier_spacing,
-                                       sample_rate="standard")
+            pusch_config = PUSCHConfig(sample_rate="standard")
+            pusch_config.carrier.subcarrier_spacing = subcarrier_spacing
             for carrier_frequency in np.arange(1e9, 10e9, .5e9):
                 pusch_config.carrier.carrier_frequency = carrier_frequency
 
@@ -247,6 +248,83 @@ class TestPUSCHDMRS:
         pilots = np.transpose(np.array(p))
         assert np.allclose(pilots, reference_dmrs)
 
+    def test_mapping_type_b_dmrs_uses_absolute_symbol_index(self):
+        """Test mapping-B DMRS against an independent TS 38.211 golden."""
+        config = PUSCHConfig(
+            mapping_type="B",
+            symbol_allocation=[5, 4],
+            n_size_bwp=4,
+        )
+        config.dmrs.dmrs_port_set = [0]
+        config.dmrs.num_cdm_groups_without_data = 1
+
+        grid = config.dmrs_grid
+        pilots = grid[0, :, 5]
+        pilots = pilots[np.flatnonzero(pilots)]
+
+        # Generated independently from TS 38.211 Sections 5.2.1 and
+        # 6.4.1.1.1.1 with c_init=2359298 for absolute slot symbol 5.
+        expected = np.array(
+            [
+                -1 - 1j, 1 + 1j, 1 - 1j, 1 + 1j,
+                -1 + 1j, -1 + 1j, -1 + 1j, -1 + 1j,
+                1 - 1j, -1 - 1j, 1 + 1j, -1 + 1j,
+                1 + 1j, 1 + 1j, -1 + 1j, -1 + 1j,
+                -1 - 1j, -1 + 1j, -1 - 1j, 1 + 1j,
+                -1 + 1j, -1 - 1j, 1 + 1j, 1 - 1j,
+            ],
+            dtype=complex,
+        ) / np.sqrt(2)
+
+        np.testing.assert_allclose(pilots, expected)
+
+    @pytest.mark.parametrize(
+        ("config_type", "num_cdm_groups", "expected_power"),
+        [(1, 1, 1.0), (1, 2, 2.0), (2, 1, 1.0), (2, 2, 2.0), (2, 3, 3.0)],
+    )
+    def test_dmrs_beta_power_ratio(
+        self, config_type, num_cdm_groups, expected_power
+    ):
+        """Test DMRS-to-PUSCH EPRE ratios from TS 38.214 Table 6.2.2-1."""
+        config = PUSCHConfig(n_size_bwp=1)
+        config.dmrs.config_type = config_type
+        config.dmrs.num_cdm_groups_without_data = num_cdm_groups
+        config.dmrs.dmrs_port_set = [0]
+
+        pilots = config.dmrs_grid[np.nonzero(config.dmrs_grid)]
+
+        assert np.mean(np.abs(pilots) ** 2) == pytest.approx(expected_power)
+
+    def test_type_a_double_symbol_position_three_rejected_for_four_symbols(self):
+        """Test the Type-A-position constraint for the l_d=4 table row."""
+        config = PUSCHConfig(symbol_allocation=[0, 4])
+        config.dmrs.length = 2
+        config.dmrs.type_a_position = 3
+
+        with pytest.raises(ValueError, match="dmrs.type_a_position must be 2"):
+            config.check_config()
+
+    @pytest.mark.parametrize(
+        ("num_symbols", "type_a_position", "additional_position", "indices"),
+        [
+            (4, 2, 0, [2, 3]),
+            (5, 3, 0, [3, 4]),
+            (14, 3, 1, [3, 4, 10, 11]),
+        ],
+    )
+    def test_valid_type_a_double_symbol_positions(
+        self, num_symbols, type_a_position, additional_position, indices
+    ):
+        """Test valid boundaries and guard against an over-broad rejection."""
+        config = PUSCHConfig(symbol_allocation=[0, num_symbols])
+        config.dmrs.length = 2
+        config.dmrs.type_a_position = type_a_position
+        config.dmrs.additional_position = additional_position
+
+        config.check_config()
+
+        assert config.dmrs_symbol_indices == indices
+
 
 class TestCheckPuschConfigs:
     """Tests for check_pusch_configs function."""
@@ -259,6 +337,8 @@ class TestCheckPuschConfigs:
         assert params["num_tx"] == 1
         assert params["num_layers"] == config.num_layers
         assert params["num_subcarriers"] == config.num_subcarriers
+        assert isinstance(params["num_bits_per_symbol"], int)
+        assert isinstance(params["target_coderate"], float)
 
     def test_multiple_configs(self):
         """Test with multiple configurations."""
@@ -268,6 +348,66 @@ class TestCheckPuschConfigs:
         params = check_pusch_configs([config1, config2])
 
         assert params["num_tx"] == 2
+
+    @pytest.mark.parametrize(
+        ("parameter", "mutator"),
+        [
+            ("tb.mcs_index", lambda c: setattr(c.tb, "mcs_index", 10)),
+            (
+                "symbol_allocation",
+                lambda c: setattr(c, "symbol_allocation", [5, 4]),
+            ),
+            ("n_size_bwp", lambda c: setattr(c, "n_size_bwp", 5)),
+            ("n_start_bwp", lambda c: setattr(c, "n_start_bwp", 1)),
+            (
+                "carrier.subcarrier_spacing",
+                lambda c: setattr(c.carrier, "subcarrier_spacing", 30),
+            ),
+            (
+                "dmrs.config_type",
+                lambda c: setattr(c.dmrs, "config_type", 2),
+            ),
+            (
+                "dmrs.additional_position",
+                lambda c: setattr(c.dmrs, "additional_position", 1),
+            ),
+        ],
+    )
+    def test_mismatched_common_parameters_rejected(self, parameter, mutator):
+        """Test that shared transmitter parameters cannot silently differ."""
+        config1 = PUSCHConfig(
+            mapping_type="B",
+            symbol_allocation=[0, 4],
+            n_size_bwp=4,
+        )
+        config2 = config1.clone()
+        mutator(config2)
+
+        with pytest.raises(ValueError, match=parameter):
+            check_pusch_configs([config1, config2])
+
+    def test_transmitter_specific_parameters_may_differ(self):
+        """Test parameters that are intentionally configured per transmitter."""
+        config1 = PUSCHConfig(n_size_bwp=4)
+        config1.dmrs.dmrs_port_set = [0]
+        config2 = config1.clone()
+        config2.n_rnti = 2
+        config2.carrier.n_cell_id = 2
+        config2.tb.n_id = 3
+        config2.dmrs.n_id = [4, 5]
+        config2.dmrs.n_scid = 1
+        config2.dmrs.dmrs_port_set = [1]
+        config2.tpmi = 1
+
+        params = check_pusch_configs([config1, config2])
+
+        assert params["n_rnti"] == [1, 2]
+        assert params["n_id"] == [1, 3]
+
+    def test_empty_list_rejected(self):
+        """Test that an empty configuration list raises a clear error."""
+        with pytest.raises(ValueError, match="must not be empty"):
+            check_pusch_configs([])
 
     def test_invalid_input_type(self):
         """Test that non-list input raises error."""
@@ -299,6 +439,16 @@ class TestCarrierConfig:
 
         with pytest.raises(ValueError):
             config.subcarrier_spacing = 45
+
+    @pytest.mark.parametrize(
+        "name",
+        ["n_cell_id", "n_size_grid", "n_start_grid", "frame_number"],
+    )
+    def test_discrete_integer_fields_reject_fractional_values(self, name):
+        """Range-membership setters must not accept fractional values."""
+        config = CarrierConfig()
+        with pytest.raises(ValueError):
+            setattr(config, name, 1.5)
 
     def test_num_symbols_per_slot(self):
         """Test num_symbols_per_slot property."""
@@ -348,6 +498,18 @@ class TestCarrierConfig:
         np.testing.assert_array_almost_equal(carrier_config.cyclic_prefix_length * 1e6, [0.29] * 14, decimal=2)
 
 
+class TestConfigUnknownKwargs:
+    """Unknown NR Config kwargs must raise, not silently drop."""
+
+    def test_unknown_kwarg_raises(self):
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            PUSCHConfig(mapping_typ="B")
+
+    def test_valid_kwarg_still_works(self):
+        config = PUSCHConfig(mapping_type="B")
+        assert config.mapping_type == "B"
+
+
 class TestPUSCHDMRSConfig:
     """Tests for PUSCHDMRSConfig."""
 
@@ -365,6 +527,8 @@ class TestPUSCHDMRSConfig:
 
         with pytest.raises(ValueError):
             config.config_type = 3
+        with pytest.raises(ValueError):
+            config.config_type = 1.5
 
     def test_length_validation(self):
         """Test length validation."""
@@ -391,6 +555,8 @@ class TestTBConfig:
 
         with pytest.raises(ValueError):
             config.mcs_index = 30
+        with pytest.raises(ValueError):
+            config.mcs_index = 1.5
 
     def test_channel_type_validation(self):
         """Test channel_type validation."""

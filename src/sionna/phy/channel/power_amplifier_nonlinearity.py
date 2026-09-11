@@ -262,7 +262,8 @@ class FreqDomainPowerAmplifierNonlinearity(Block):
         self._pa = pa
 
     def call(self, inputs: torch.Tensor) -> torch.Tensor:
-        assert inputs.shape[-1] == self._orig_fft_size, f"Last dimension of input must be {self._orig_fft_size}."
+        if inputs.shape[-1] != self._orig_fft_size:
+            raise ValueError(f"Last dimension of input must be {self._orig_fft_size}.")
         x_freq = torch.nn.functional.pad(inputs, (self._zero_pads, self._zero_pads))
         x_time = self._ofdm_modulator(x_freq) * math.sqrt(self._upsampling_factor)
         time_shape = x_time.shape

@@ -6,8 +6,9 @@
 
 import numpy as np
 
-from .config import Config
+from sionna._validation import check_one_of, check_scalar_range
 
+from .config import Config
 
 __all__ = ["CarrierConfig"]
 
@@ -44,8 +45,12 @@ class CarrierConfig(Config):
 
     @n_cell_id.setter
     def n_cell_id(self, value: int) -> None:
-        if value not in range(1008):
-            raise ValueError("n_cell_id must be in the range from 0 to 1007")
+        check_one_of(
+            value,
+            range(1008),
+            name="n_cell_id",
+            message="n_cell_id must be in the range from 0 to 1007",
+        )
         self._n_cell_id = value
 
     @property
@@ -61,8 +66,12 @@ class CarrierConfig(Config):
 
     @cyclic_prefix.setter
     def cyclic_prefix(self, value: str) -> None:
-        if value not in ["normal", "extended"]:
-            raise ValueError("Invalid cyclic prefix")
+        check_one_of(
+            value,
+            ("normal", "extended"),
+            name="cyclic_prefix",
+            message="Invalid cyclic prefix",
+        )
         self._cyclic_prefix = value
 
     @property
@@ -74,8 +83,12 @@ class CarrierConfig(Config):
 
     @subcarrier_spacing.setter
     def subcarrier_spacing(self, value: int) -> None:
-        if value not in [15, 30, 60, 120, 240, 480, 960]:
-            raise ValueError("Invalid subcarrier spacing")
+        check_one_of(
+            value,
+            (15, 30, 60, 120, 240, 480, 960),
+            name="subcarrier_spacing",
+            message="Invalid subcarrier spacing",
+        )
         self._subcarrier_spacing = value
 
     @property
@@ -88,8 +101,12 @@ class CarrierConfig(Config):
 
     @n_size_grid.setter
     def n_size_grid(self, value: int) -> None:
-        if value not in range(1, 276):
-            raise ValueError("n_size_grid must be in the range from 1 to 275")
+        check_one_of(
+            value,
+            range(1, 276),
+            name="n_size_grid",
+            message="n_size_grid must be in the range from 1 to 275",
+        )
         self._n_size_grid = value
 
     @property
@@ -102,8 +119,12 @@ class CarrierConfig(Config):
 
     @n_start_grid.setter
     def n_start_grid(self, value: int) -> None:
-        if value not in range(0, 2200):
-            raise ValueError("n_start_grid must be in the range from 0 to 2199")
+        check_one_of(
+            value,
+            range(2200),
+            name="n_start_grid",
+            message="n_start_grid must be in the range from 0 to 2199",
+        )
         self._n_start_grid = value
 
     @property
@@ -115,8 +136,14 @@ class CarrierConfig(Config):
 
     @slot_number.setter
     def slot_number(self, value: int) -> None:
-        if not 0 <= value < self.num_slots_per_frame:
-            raise ValueError("slot_number cannot exceed the number of slots per frame-1")
+        check_scalar_range(
+            value,
+            name="slot_number",
+            minimum=0,
+            maximum=self.num_slots_per_frame,
+            upper_inclusive=False,
+            message=("slot_number cannot exceed the number of slots per frame-1"),
+        )
         self._slot_number = value
 
     @property
@@ -128,14 +155,18 @@ class CarrierConfig(Config):
 
     @frame_number.setter
     def frame_number(self, value: int) -> None:
-        if value not in range(0, 1024):
-            raise ValueError("frame_number must be in [0, 1023]")
+        check_one_of(
+            value,
+            range(1024),
+            name="frame_number",
+            message="frame_number must be in [0, 1023]",
+        )
         self._frame_number = value
 
     @property
     def carrier_frequency(self) -> float:
         r"""Carrier frequency :math:`f_0` in Hz"""
-        self._ifndef("carrier_frequency", 0.)
+        self._ifndef("carrier_frequency", 0.0)
         return self._carrier_frequency
 
     @carrier_frequency.setter
@@ -225,11 +256,12 @@ class CarrierConfig(Config):
             cp[:] = 144 * self.kappa * 2 ** (-self.mu)
 
             # Extend cyclic prefix for l=0 or l=7*2^\mu
-            long_cp_period = 7 * 2 ** self.mu
+            long_cp_period = 7 * 2**self.mu
             l_start = self.slot_number * self.num_symbols_per_slot
-            for i in range(l_start % long_cp_period,
-                           self.num_symbols_per_slot, long_cp_period):
-                cp[i] += 16*self.kappa
+            for i in range(
+                l_start % long_cp_period, self.num_symbols_per_slot, long_cp_period
+            ):
+                cp[i] += 16 * self.kappa
         return cp * self.t_c
 
     # -------------------
@@ -255,4 +287,3 @@ class CarrierConfig(Config):
         for attr in attr_list:
             value = getattr(self, attr)
             setattr(self, attr, value)
-
